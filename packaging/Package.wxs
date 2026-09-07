@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="LoreLens"
+    Manufacturer="LoreLens"
+    Version="0.1.0.0"
+    UpgradeCode="6D7D0B1B-8C8D-4A28-9E9A-7B9B6D0D0E10"
+    Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of LoreLens is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="LoreLens">
+        <Component Id="ApplicationComponent" Guid="*">
+          <File Id="LoreLensExe" Source="$(var.ExePath)" KeyPath="yes" />
+        </Component>
+        <Directory Id="LoreCliFolder" Name="dist">
+          <Component Id="LoreCliComponent" Guid="*">
+            <File Id="LoreCliExe" Source="$(var.LoreCliPath)" Name="lore.exe" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="LoreLens">
+        <Component Id="StartMenuComponent" Guid="*">
+          <Shortcut Id="LoreLensStartMenuShortcut" Name="LoreLens" Target="[INSTALLFOLDER]lorelens.exe" WorkingDirectory="INSTALLFOLDER" />
+          <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
+          <RegistryValue Root="HKCU" Key="Software\LoreLens" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="LoreLens" Level="1">
+      <ComponentRef Id="ApplicationComponent" />
+      <ComponentRef Id="LoreCliComponent" />
+      <ComponentRef Id="StartMenuComponent" />
+    </Feature>
+  </Package>
+</Wix>
