@@ -1,4 +1,9 @@
 {
+  "Logout": "Logout",
+  "Logged out": "Logged out",
+  "Log out all Lore CLI accounts on this device? URL history and local repositories will be kept.": "Log out all Lore CLI accounts on this device? URL history and local repositories will be kept.",
+  "Cannot determine the account remote URL. Use Account > Login to select the server, then retry Clone.": "Cannot determine the account remote URL. Use Account > Login to select the server, then retry Clone.",
+  "Enter an absolute destination path.": "Enter an absolute destination path.",
   "Server URL": "Server URL",
   "No local repository. Enter the server URL to log in, then clone a repository.": "No local repository. Enter the server URL to log in, then clone a repository.",
   "Enter a server URL including its scheme.": "Enter a server URL including its scheme.",

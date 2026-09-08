@@ -1,4 +1,9 @@
 {
+  "Logout": "退出登录",
+  "Logged out": "已退出登录",
+  "Log out all Lore CLI accounts on this device? URL history and local repositories will be kept.": "退出此设备上的所有 Lore CLI 账户？URL 历史和本地仓库将保留。",
+  "Cannot determine the account remote URL. Use Account > Login to select the server, then retry Clone.": "无法确定账户的远程 URL。请通过 Account > Login 选择服务器，然后重试克隆。",
+  "Enter an absolute destination path.": "请输入绝对目标路径。",
   "Server URL": "服务器 URL",
   "No local repository. Enter the server URL to log in, then clone a repository.": "没有本地仓库。请输入服务器 URL 登录，然后克隆仓库。",
   "Enter a server URL including its scheme.": "请输入包含协议的服务器 URL。",

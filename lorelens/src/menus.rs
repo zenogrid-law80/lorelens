@@ -46,7 +46,7 @@ impl Lens {
                         ("Dark theme", "Dark", true),
                         ("Command log", "log", true),
                     ],
-                    _ => vec![("Login…", "login", ready)],
+                    _ => vec![("Login…", "login", ready), ("Logout", "logout", ready)],
                 };
                 for (label, action, enabled) in items {
                     let view = view.clone();
@@ -70,6 +70,7 @@ impl Lens {
                                     }
                                     "commit" => this.commit_staged(cx),
                                     "login" => this.login_dialog(window, cx),
+                                    "logout" => this.logout_dialog(window, cx),
                                     "System" | "Light" | "Dark" => {
                                         this.settings.theme = action.into();
                                         apply_theme(action, Some(window), cx);

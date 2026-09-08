@@ -3,6 +3,7 @@ use super::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommandKind {
     Login,
+    Logout,
     Account,
     ListBranches,
     Sync,
@@ -19,6 +20,7 @@ impl CommandKind {
             args.get(1).map(String::as_str),
         ) {
             (Some("login"), _) => Self::Login,
+            (Some("auth"), Some("clear")) => Self::Logout,
             (Some("auth"), Some("info")) => Self::Account,
             (Some("branch"), Some("list")) => Self::ListBranches,
             (Some("sync"), _) => Self::Sync,
@@ -51,6 +53,7 @@ mod tests {
     fn command_behavior_is_derived_from_arguments() {
         let cases = [
             (vec!["login"], CommandKind::Login),
+            (vec!["auth", "clear"], CommandKind::Logout),
             (vec!["auth", "info"], CommandKind::Account),
             (vec!["branch", "list"], CommandKind::ListBranches),
             (
@@ -118,6 +121,7 @@ impl Lens {
         let kind = CommandKind::from_args(&args);
         let authentication = kind.is_authentication();
         let login = kind == CommandKind::Login;
+        let login_remote = if login { args.get(1).cloned() } else { None };
         let branches = kind == CommandKind::ListBranches;
         let task = cx.background_executor().spawn(async move {
             let result = backend::run_as(
@@ -226,7 +230,21 @@ impl Lens {
                             this.branch_output = lines.join("\n");
                             this.notice = "Branches loaded".into();
                             this.command(vec!["auth".into(), "info".into()], "Account", false, false, cx);
+                        } else if kind == CommandKind::Logout {
+                            this.settings.identity = None;
+                            this.settings.login_remote = None;
+                            this.logged_in_account = "Not signed in".into();
+                            this.startup_login_pending = false;
+                            this.refresh_pending = false;
+                            this.connected = false;
+                            this.notice = "Logged out".into();
+                            this.output_title = "Logout".into();
+                            this.output = t("Logged out");
+                            this.show_log = false;
+                            this.save_settings();
                         } else if kind == CommandKind::Login {
+                            this.settings.login_remote = login_remote;
+                            this.save_settings();
                             this.notice = "Login completed. Open or clone a repository.".into();
                             this.output = t(&this.notice);
                             this.output_title = "Login".into();

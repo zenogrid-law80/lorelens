@@ -1,4 +1,9 @@
 {
+  "Logout": "로그아웃",
+  "Logged out": "로그아웃되었습니다",
+  "Log out all Lore CLI accounts on this device? URL history and local repositories will be kept.": "이 기기의 모든 Lore CLI 계정을 로그아웃할까요? URL 기록과 로컬 저장소는 유지됩니다.",
+  "Cannot determine the account remote URL. Use Account > Login to select the server, then retry Clone.": "계정의 Remote URL을 확인할 수 없습니다. Account > Login에서 서버를 선택한 뒤 Clone을 다시 실행하세요.",
+  "Enter an absolute destination path.": "저장할 절대 경로를 입력하세요.",
   "Server URL": "서버 URL",
   "No local repository. Enter the server URL to log in, then clone a repository.": "로컬 저장소가 없습니다. 서버 URL로 로그인한 뒤 저장소를 복제하세요.",
   "Enter a server URL including its scheme.": "프로토콜을 포함한 서버 URL을 입력하세요.",

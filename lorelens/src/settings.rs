@@ -5,6 +5,7 @@ use std::{
 };
 
 pub struct Settings {
+    pub login_remote: Option<String>,
     pub login_urls: Vec<String>,
     pub recent: Vec<PathBuf>,
     pub cli: Option<PathBuf>,
@@ -21,11 +22,25 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { login_urls: Vec::new(), recent: Vec::new(), cli: None, theme: "System".into(), language: "en-US".into(), external_tool: "idea".into(), tool_paths: Default::default(), identity: None, clone_url: String::new(), clone_destination: String::new(), clone_urls: Vec::new(), clone_destinations: Vec::new() }
+        Self { login_remote: None, login_urls: Vec::new(), recent: Vec::new(), cli: None, theme: "System".into(), language: "en-US".into(), external_tool: "idea".into(), tool_paths: Default::default(), identity: None, clone_url: String::new(), clone_destination: String::new(), clone_urls: Vec::new(), clone_destinations: Vec::new() }
     }
 }
 
 impl Settings {
+    /// Older settings stored login input history but no successful-login URL.
+    /// Only recover an unambiguous destination; history is not proof of authentication.
+    pub fn clone_remote(&self) -> Option<String> {
+        if let Some(remote) = self.login_remote.as_deref().map(str::trim).filter(|url| !url.is_empty()) {
+            return Some(remote.into());
+        }
+        let mut candidates = self.login_urls.iter().map(|url| url.trim()).filter(|url| !url.is_empty());
+        let remote = candidates.next()?;
+        if candidates.any(|other| other != remote) {
+            return None;
+        }
+        Some(remote.into())
+    }
+
     pub fn path() -> PathBuf {
         if let Some(base) = std::env::var_os("LOCALAPPDATA") {
             PathBuf::from(base).join("LoreLens/settings.json")
@@ -50,6 +65,7 @@ impl Settings {
             serde_json::from_value(data.get("recent").cloned().unwrap_or(json!([])))?;
         let cli = serde_json::from_value(data.get("cli").cloned().unwrap_or(Value::Null))?;
         Ok(Self {
+            login_remote: data["login_remote"].as_str().filter(|url| !url.trim().is_empty()).map(str::to_owned),
             login_urls: serde_json::from_value(data.get("login_urls").cloned().unwrap_or(json!([])))?,
             recent: recent.into_iter().take(10).collect(),
             cli,
@@ -102,7 +118,7 @@ impl Settings {
         }
         let temp = path.with_extension(format!("{}.tmp", std::process::id()));
         let mut file = fs::File::create(&temp)?;
-        serde_json::to_writer_pretty(&mut file, &json!({"login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "recent": self.recent, "cli": self.cli, "theme": self.theme, "identity": self.identity, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}))?;
+        serde_json::to_writer_pretty(&mut file, &json!({"login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "recent": self.recent, "cli": self.cli, "theme": self.theme, "identity": self.identity, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}))?;
         file.sync_all()?;
         drop(file);
         fs::rename(temp, path)
@@ -112,6 +128,23 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn clone_recovers_legacy_login_url_without_guessing_between_servers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, r#"{"login_urls":["lores://server:41337"]}"#).unwrap();
+        let mut settings = Settings::load(&path).unwrap();
+        assert_eq!(settings.clone_remote().as_deref(), Some("lores://server:41337"));
+        assert!(settings.login_remote.is_none());
+        settings.save(&path).unwrap();
+        assert_eq!(Settings::load(&path).unwrap().clone_remote(), settings.clone_remote());
+        settings.remember_login("lores://other:41337");
+        assert!(settings.clone_remote().is_none());
+        settings.login_remote = Some("lores://signed-in:41337".into());
+        assert_eq!(settings.clone_remote().as_deref(), Some("lores://signed-in:41337"));
+        assert!(Settings::default().clone_remote().is_none());
+    }
+
     #[test]
     fn login_history_survives_restart_and_deduplicates() {
         let dir = tempfile::tempdir().unwrap();

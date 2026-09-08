@@ -258,7 +258,7 @@ pub fn clone_repository(
             return Err("Destination must be a new or empty folder.".into());
         }
     }
-    run_as(
+    let output = run_as(
         cli,
         parent,
         &[
@@ -269,7 +269,14 @@ pub fn clone_repository(
         ],
         false,
         identity,
-    )
+    )?;
+    if !is_repository(destination) {
+        return Err(format!(
+            "Clone completed but no repository was found at {}.\n{output}",
+            destination.display()
+        ));
+    }
+    Ok(output)
 }
 
 pub fn move_entry(root: &Path, source: &Path, destination: &Path) -> Result<(), String> {
@@ -338,6 +345,31 @@ pub fn parse_account(output: &str) -> Result<(String, String), String> {
     account.ok_or_else(|| "No authenticated account returned".into())
 }
 
+pub fn has_valid_login(output: &str, identity: Option<&str>, now_ms: u64) -> Result<bool, String> {
+    let mut complete = false;
+    let mut valid = false;
+    for line in output.lines().filter(|line| !line.trim().is_empty()) {
+        let event: Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
+        match event["tagName"].as_str() {
+            Some("authIdentity") => {
+                let data = &event["data"];
+                valid |= data["userId"].as_str().is_some_and(|id| {
+                    !id.is_empty() && identity.is_none_or(|selected| selected == id)
+                }) && data["expires"].as_u64().is_some_and(|expires| expires > now_ms);
+            }
+            Some("complete") => {
+                if event["data"]["status"].as_i64() != Some(0) {
+                    return Err("Login state check failed".into());
+                }
+                complete = true;
+            }
+            _ => {}
+        }
+    }
+    if !complete { return Err("Login state check did not complete".into()); }
+    Ok(valid)
+}
+
 pub fn update_repository_identity(root: &Path, identity: &str) -> Result<(), String> {
     use std::io::Write;
     let path = root.join(".lore/config.toml");
@@ -376,6 +408,20 @@ pub struct Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn startup_login_checks_identity_expiration_and_completion() {
+        let output = concat!(
+            "{\"tagName\":\"authIdentity\",\"data\":{\"userId\":\"alice\",\"expires\":2000}}\n",
+            "{\"tagName\":\"complete\",\"data\":{\"status\":0}}"
+        );
+        assert!(has_valid_login(output, Some("alice"), 1000).unwrap());
+        assert!(!has_valid_login(output, Some("bob"), 1000).unwrap());
+        assert!(!has_valid_login(output, None, 2000).unwrap());
+        assert!(!has_valid_login(r#"{"tagName":"complete","data":{"status":0}}"#, None, 0).unwrap());
+        assert!(has_valid_login("", None, 0).is_err());
+        assert!(has_valid_login(r#"{"tagName":"complete","data":{"status":45}}"#, None, 0).is_err());
+    }
+
     #[test]
     fn repository_detection_requires_metadata_directory() {
         let root = tempfile::tempdir().unwrap();

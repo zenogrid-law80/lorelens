@@ -87,6 +87,7 @@ struct Lens {
     remote_branches: Vec<String>,
     show_branches: bool,
     connect_after_load: bool,
+    startup_login_pending: bool,
     refresh_pending: bool,
     logged_in_account: String,
     pending_push: Result<Vec<String>, String>,
@@ -249,6 +250,7 @@ impl Lens {
             filter, notice: "Opening repository…".into(), error: false, show_log: false,
             settings, settings_error, branch_output: String::new(), show_branches: false,
             connect_after_load,
+            startup_login_pending: false,
             refresh_pending: false,
             logged_in_account: "Not signed in".into(),
             local_branches: Vec::new(),
@@ -296,6 +298,8 @@ impl Lens {
         }
         self.root = canonicalize_path(path);
         self.directory = self.root.clone();
+        self.folder_to_select = None;
+        self.refresh_pending = false;
         self.status = Status::default();
         self.locked_paths.clear();
         self.connected = false;
@@ -315,6 +319,10 @@ impl Lens {
         self.output.clear();
         self.output_title = "Repository opened".into();
         self.connect_after_load = backend::is_repository(&self.root);
+        if self.connect_after_load {
+            self.settings.remember(&self.root);
+            self.save_settings();
+        }
         self.load_directory(cx);
     }
 
@@ -399,8 +407,6 @@ impl Lens {
                         );
                         if this.connect_after_load {
                             this.connect_after_load = false;
-                            this.settings.remember(&this.root);
-                            this.save_settings();
                             this.command(
                                 vec!["status".into()],
                                 "Repository status",
@@ -700,7 +706,33 @@ fn main() {
                 },
                 move |window, cx| {
                     let view = cx.new(|cx| Lens::new(root, settings, settings_error, cx));
-                    view.update(cx, |_, cx| {
+                    view.update(cx, |this, cx| {
+                        cx.observe_in(&cx.entity(), window, |this, _, window, cx| {
+                            if this.startup_login_pending && !this.busy {
+                                this.startup_login_pending = false;
+                                this.login_dialog(window, cx);
+                            }
+                        }).detach();
+                        let cli = this.cli.clone();
+                        let root = this.root.clone();
+                        let identity = this.settings.identity.clone();
+                        let check = cx.background_executor().spawn(async move {
+                            let output = backend::run_as(&cli, &root,
+                                &["auth".into(), "list".into()], true, None)?;
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+                            backend::has_valid_login(&output, identity.as_deref(), now)
+                        });
+                        cx.spawn(async move |this, cx| {
+                            let result = check.await;
+                            let _ = this.update(cx, |this, cx| {
+                                match result {
+                                    Ok(valid) => this.startup_login_pending = !valid,
+                                    Err(error) => this.log(format!("Startup login check: {error}")),
+                                }
+                                cx.notify();
+                            });
+                        }).detach();
                         let mut was_active = window.is_window_active();
                         cx.observe_window_activation(window, move |this, window, cx| {
                             let active = window.is_window_active();

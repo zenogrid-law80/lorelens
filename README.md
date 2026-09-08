@@ -55,7 +55,7 @@ If an authenticated command fails, log in again with the Lore CLI:
 
 ```powershell
 cd C:\GitHub\lore
-..\lore\target\debug\lore.exe login lores://lore.zenogrid.co.kr:41337
+..\lore\target\debug\lore.exe login lores://<url>:41337
 ```
 
 Refresh uses `--scan` to update Lore's dirty state. Commits are not pushed automatically. Commands run in the background with direct argument passing, without a shell. Duplicate operations are blocked while a command is running.
