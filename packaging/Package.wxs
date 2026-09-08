@@ -7,7 +7,13 @@
     UpgradeCode="6D7D0B1B-8C8D-4A28-9E9A-7B9B6D0D0E10"
     Scope="perMachine">
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of LoreLens is already installed." />
+    <!-- Keep UpgradeCode stable so new MSI packages replace existing installations.
+         Remove the old product inside the transaction before copying files, including
+         unversioned Rust executables; a failed upgrade can roll back the removal. -->
+    <MajorUpgrade
+      AllowSameVersionUpgrades="yes"
+      Schedule="afterInstallInitialize"
+      DowngradeErrorMessage="A newer version of LoreLens is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
