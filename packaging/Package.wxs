@@ -3,7 +3,7 @@
   <Package
     Name="LoreLens"
     Manufacturer="LoreLens"
-    Version="0.1.1.0"
+    Version="0.1.2.0"
     UpgradeCode="6D7D0B1B-8C8D-4A28-9E9A-7B9B6D0D0E10"
     Scope="perMachine">
 
