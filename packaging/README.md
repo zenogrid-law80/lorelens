@@ -1,3 +1,16 @@
+# macOS 앱 만들기
+
+macOS에서 Xcode와 Metal Toolchain 설치 후 프로젝트 루트에서 실행합니다.
+
+```bash
+bash packaging/build-macos.sh
+open dist/LoreLens.app
+```
+
+`dist/LoreLens.app`에 실행 파일과 `favicon.png`에서 생성한 다중 해상도 ICNS 아이콘을 포함합니다. 로컬 실행을 위한 ad-hoc 서명을 적용하며, 외부 배포용 Developer ID 서명과 공증은 별도입니다. Lore CLI는 앱의 **Locate CLI…**에서 선택합니다.
+
+빠른 개발 빌드는 `bash packaging/build-macos.sh debug`로 만듭니다. `cargo run`으로 직접 실행해도 내장 PNG를 사용해 Dock 아이콘을 설정합니다.
+
 # MSI 패키지 만들기
 
 PowerShell에서 프로젝트 루트 기준으로 실행합니다.

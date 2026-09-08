@@ -1,10 +1,10 @@
-use std::path::PathBuf;
 
 fn main() {
     println!("cargo:rerun-if-changed=dist/favicon.ico");
 
     #[cfg(windows)]
     {
+        use std::path::PathBuf;
         let ico = PathBuf::from("dist").join("favicon.ico");
 
         let mut resource = winresource::WindowsResource::new();

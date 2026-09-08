@@ -1,5 +1,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 mod state;
+#[cfg(target_os = "macos")]
+mod macos;
 use state::{PreviewState, SelectionState};
 mod theme;
 use theme::{ColorRole::*, apply_theme, palette};
@@ -679,6 +681,8 @@ fn main() {
     Application::new()
         .with_assets(gpui_component_assets::Assets)
         .run(move |cx: &mut App| {
+            #[cfg(target_os = "macos")]
+            macos::set_application_icon();
             gpui_component::init(cx);
             let theme_set: gpui_component::ThemeSet =
                 serde_json::from_str(include_str!("../themes/longbridge-pro.json"))
