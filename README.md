@@ -36,6 +36,10 @@ Double-clicking a file opens it with the operating system's default application.
 
 Use **Clone repository…** to enter a repository URL and absolute destination path. The parent folder must exist, and the destination must be new or empty. On success, the cloned repository opens automatically. The most recent URL and destination values are restored from local settings.
 
+Use **Repository → Create repository…** to create a remote Lore repository and its local workspace. Log in to the server first, then enter the full repository URL (for example, `lores://server:port/project`) and an absolute local destination. The parent folder must exist and the destination must be new or empty. The new repository opens automatically on success; failures appear in Details and the command log.
+
+The create dialog remembers the last URL and destination, including when canceled. Each field offers its ten most recent non-empty values without duplicates, saved across app restarts separately from clone history.
+
 The **Account** button displays the account used by the current workspace (`lore auth info`). Authentication tokens are never displayed. **Sync** runs `lore sync` and refreshes the file list, change status, lock indicators, and branch information. `--reset` and `--force` are not used.
 
 Use `Ctrl` (or `Cmd` on macOS) plus click to add or remove files and folders from the selection. Use `Shift` plus click to select a range. Stage, Unstage, and Diff apply to the selected items; context-menu actions apply to the item that was right-clicked.

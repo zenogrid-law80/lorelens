@@ -333,14 +333,15 @@ impl Lens {
                             let view = view.clone();
                             let staging = view.upgrade().and_then(|entity| {
                                 let lens = entity.read(cx);
-                                if directory || lens.root != context_root {
+                                if lens.root != context_root {
                                     return None;
                                 }
-                                lens.status
-                                    .changes
-                                    .iter()
-                                    .find(|c| c.path == context_relative)
-                                    .map(|c| (c.staged, !lens.busy && lens.connected))
+                                let mut changes = lens.status.changes.iter().filter(|c| {
+                                    c.path == context_relative || (directory
+                                        && std::path::Path::new(&c.path).starts_with(&context_relative))
+                                }).peekable();
+                                changes.peek()?;
+                                Some((changes.any(|c| c.staged), !lens.busy && lens.connected))
                             });
                             let menu = if let Some((staged, enabled)) = staging {
                                 let mut menu = menu;
@@ -351,7 +352,11 @@ impl Lens {
                                     let stage_view = view.clone();
                                     let stage_path = context_relative.clone();
                                     let stage_root = context_root.clone();
-                                    let label = if unstage {
+                                    let label = if directory && unstage {
+                                        "Unstage folder"
+                                    } else if directory {
+                                        "Stage folder"
+                                    } else if unstage {
                                         "Unstage file"
                                     } else {
                                         "Stage file"
@@ -363,9 +368,9 @@ impl Lens {
                                                     if this.busy
                                                         || !this.connected
                                                         || this.root != stage_root
-                                                        || this.root.join(&stage_path).is_dir()
                                                         || !this.status.changes.iter().any(|c| {
-                                                            c.path == stage_path
+                                                            (c.path == stage_path || (directory
+                                                                && std::path::Path::new(&c.path).starts_with(&stage_path)))
                                                                 && (!unstage || c.staged)
                                                         })
                                                     {

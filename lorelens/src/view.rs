@@ -227,6 +227,12 @@ impl Render for Lens {
                                 .child(self.message.clone()),
                         )
                         .child(
+                            self.button("generate-message", "Generate message", vcs && staged > 0)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.generate_commit_message(cx);
+                                })),
+                        )
+                        .child(
                             self.button("commit", "Commit staged", vcs && staged > 0)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.commit_staged(cx);

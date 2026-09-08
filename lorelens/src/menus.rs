@@ -31,6 +31,7 @@ impl Lens {
                     "Repository" => vec![
                         ("Open repository…", "open", ready),
                         ("Clone repository…", "clone", ready),
+                        ("Create repository…", "create", ready),
                     ],
                     "Changes" => vec![
                         ("Stage", "stage", file),
@@ -64,6 +65,7 @@ impl Lens {
                                 match action {
                                     "open" => this.choose(false, cx),
                                     "clone" => this.clone_dialog(window, cx),
+                                    "create" => this.create_repository_dialog(window, cx),
                                     "stage" | "unstage" | "history" => {
                                         this.file_command(action, cx)
                                     }
@@ -153,8 +155,12 @@ impl Lens {
                     for path in &recent {
                         let view = view.clone();
                         let path = path.clone();
+                        let label = match backend::repository_remote_url(&path) {
+                            Some(url) => format!("{} — {url}", path.display()),
+                            None => path.display().to_string(),
+                        };
                         menu = menu.item(
-                            PopupMenuItem::new(path.display().to_string())
+                            PopupMenuItem::new(label)
                                 .disabled(!ready)
                                 .on_click(move |_, _, cx| {
                                     let _ = view.update(cx, |this, cx| {

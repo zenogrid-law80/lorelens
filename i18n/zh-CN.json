@@ -1,4 +1,10 @@
 {
+  "Generate message": "生成消息",
+  "Stage files before generating a commit message.": "请先暂存文件，再生成提交消息。",
+  "Generated commit message from staged changes.": "已根据暂存的更改生成提交消息。",
+  "Enter a server URL including the repository name.": "请输入包含仓库名称的服务器 URL。",
+  "Stage folder": "暂存文件夹",
+  "Unstage folder": "取消暂存文件夹",
   "Logout": "退出登录",
   "Logged out": "已退出登录",
   "Log out all Lore CLI accounts on this device? URL history and local repositories will be kept.": "退出此设备上的所有 Lore CLI 账户？URL 历史和本地仓库将保留。",
@@ -189,5 +195,12 @@
   "Revert file…": "还原文件…",
   "Revert file": "还原文件",
   "Remove this file from staging? Local file changes will be kept.": "要取消暂存此文件吗？本地文件更改将被保留。",
-  "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.": "要将此文件还原到当前已提交的修订吗？已删除的文件将恢复，暂存的更改将被丢弃。本地修改将丢失，新添加的文件将被删除。"
+  "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.": "要将此文件还原到当前已提交的修订吗？已删除的文件将恢复，暂存的更改将被丢弃。本地修改将丢失，新添加的文件将被删除。",
+  "Create repository…": "创建仓库…",
+  "Create repository": "创建仓库",
+  "Create a remote repository and its local workspace. Log in to the server first.": "创建远程仓库及其本地工作区。请先登录服务器。",
+  "Enter a repository URL including its scheme and repository name.": "请输入包含协议和仓库名称的仓库 URL。",
+  "Creating repository…": "正在创建仓库…",
+  "Create failed — see details": "创建失败 — 请查看详情",
+  "Create failed": "创建失败"
 }

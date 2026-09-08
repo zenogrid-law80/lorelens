@@ -279,6 +279,34 @@ pub fn clone_repository(
     Ok(output)
 }
 
+pub fn create_repository(
+    cli: &Path,
+    url: &str,
+    destination: &Path,
+    identity: Option<&str>,
+) -> Result<String, String> {
+    if !url.contains("://") || url.ends_with("://") || url.chars().any(char::is_whitespace) {
+        return Err("Enter a repository URL including its scheme and repository name.".into());
+    }
+    if !destination.is_absolute() {
+        return Err("Enter an absolute destination path.".into());
+    }
+    let parent = destination.parent().filter(|path| path.is_dir())
+        .ok_or("Destination parent folder must exist.")?;
+    if destination.exists() && (!destination.is_dir() || fs::read_dir(destination)
+        .map_err(|e| e.to_string())?.next().is_some()) {
+        return Err("Destination must be a new or empty folder.".into());
+    }
+    let output = run_as(cli, parent, &[
+        "--repository".into(), destination.to_string_lossy().into_owned(),
+        "repository".into(), "create".into(), "--".into(), url.into(),
+    ], false, identity)?;
+    if !is_repository(destination) {
+        return Err(format!("Create completed but no repository was found at {}.\n{output}", destination.display()));
+    }
+    Ok(output)
+}
+
 pub fn move_entry(root: &Path, source: &Path, destination: &Path) -> Result<(), String> {
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let source = source.canonicalize().map_err(|e| e.to_string())?;
@@ -398,6 +426,19 @@ pub fn update_repository_identity(root: &Path, identity: &str) -> Result<(), Str
     Ok(())
 }
 
+pub fn repository_remote_url(root: &Path) -> Option<String> {
+    for metadata in [".lore", ".urc"] {
+        let path = root.join(metadata).join("config.toml");
+        let Ok(text) = fs::read_to_string(path) else { continue; };
+        let Ok(config) = text.parse::<toml_edit::DocumentMut>() else { continue; };
+        if let Some(url) = config.get("remote_url").and_then(|item| item.as_str()) {
+            let url = url.trim();
+            if !url.is_empty() { return Some(url.to_owned()); }
+        }
+    }
+    None
+}
+
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub path: PathBuf,
@@ -472,6 +513,24 @@ mod tests {
             fs::read_to_string(root.path().join("keep.txt")).unwrap(),
             "keep"
         );
+    }
+    #[test]
+    fn create_rejects_invalid_inputs_without_touching_files() {
+        let root = tempfile::tempdir().unwrap();
+        let cli = Path::new("does-not-exist");
+        fs::write(root.path().join("keep.txt"), "keep").unwrap();
+        for (url, path, expected) in [
+            ("invalid", root.path(), "URL"),
+            ("lores://example/repo", Path::new("relative"), "absolute"),
+            ("lores://example/repo", root.path(), "empty folder"),
+        ] {
+            assert!(create_repository(cli, url, path, None).unwrap_err().contains(expected));
+        }
+        assert_eq!(fs::read_to_string(root.path().join("keep.txt")).unwrap(), "keep");
+        let missing = root.path().join("missing").join("repo");
+        assert!(create_repository(cli, "lores://example/repo", &missing, None)
+            .unwrap_err().contains("parent folder"));
+        assert!(!missing.exists());
     }
     #[test]
     fn repository_identity_preserves_other_config_and_rejects_invalid_toml() {

@@ -14,6 +14,10 @@ pub struct Settings {
     pub external_tool: String,
     pub tool_paths: std::collections::BTreeMap<String, PathBuf>,
     pub identity: Option<String>,
+    pub create_url: String,
+    pub create_destination: String,
+    pub create_urls: Vec<String>,
+    pub create_destinations: Vec<String>,
     pub clone_url: String,
     pub clone_destination: String,
     pub clone_urls: Vec<String>,
@@ -22,7 +26,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { login_remote: None, login_urls: Vec::new(), recent: Vec::new(), cli: None, theme: "System".into(), language: "en-US".into(), external_tool: "idea".into(), tool_paths: Default::default(), identity: None, clone_url: String::new(), clone_destination: String::new(), clone_urls: Vec::new(), clone_destinations: Vec::new() }
+        Self { login_remote: None, login_urls: Vec::new(), recent: Vec::new(), cli: None, theme: "System".into(), language: "en-US".into(), external_tool: "idea".into(), tool_paths: Default::default(), identity: None, create_url: String::new(), create_destination: String::new(), create_urls: Vec::new(), create_destinations: Vec::new(), clone_url: String::new(), clone_destination: String::new(), clone_urls: Vec::new(), clone_destinations: Vec::new() }
     }
 }
 
@@ -108,6 +112,10 @@ impl Settings {
                 .unwrap_or("idea").into(),
             tool_paths: serde_json::from_value(data.get("tool_paths").cloned().unwrap_or(json!({})))?,
             identity: data["identity"].as_str().filter(|id| !id.is_empty()).map(str::to_string),
+            create_url: data["create_url"].as_str().unwrap_or_default().into(),
+            create_destination: data["create_destination"].as_str().unwrap_or_default().into(),
+            create_urls: serde_json::from_value(data.get("create_urls").cloned().unwrap_or(json!([])))?,
+            create_destinations: serde_json::from_value(data.get("create_destinations").cloned().unwrap_or(json!([])))?,
             clone_url: data["clone_url"].as_str().unwrap_or_default().into(),
             clone_destination: data["clone_destination"].as_str().unwrap_or_default().into(),
             clone_urls: serde_json::from_value(data.get("clone_urls").cloned().unwrap_or(json!([])))?,
@@ -126,6 +134,17 @@ impl Settings {
             Err(error) => error.kind() != io::ErrorKind::NotFound,
         });
         self.recent.len() != before
+    }
+
+    pub fn remember_create(&mut self, url: &str, destination: &str) {
+        self.create_url = url.trim().into();
+        self.create_destination = destination.trim().into();
+        for (history, value) in [(&mut self.create_urls, &self.create_url), (&mut self.create_destinations, &self.create_destination)] {
+            if value.is_empty() { continue; }
+            history.retain(|entry| entry != value);
+            history.insert(0, value.clone());
+            history.truncate(10);
+        }
     }
 
     pub fn remember_clone(&mut self) {
@@ -156,7 +175,7 @@ impl Settings {
         }
         let temp = path.with_extension(format!("{}.tmp", std::process::id()));
         let mut file = fs::File::create(&temp)?;
-        serde_json::to_writer_pretty(&mut file, &json!({"login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "recent": Self::normalized_recent(self.recent.clone()), "cli": self.cli, "theme": self.theme, "identity": self.identity, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}))?;
+        serde_json::to_writer_pretty(&mut file, &json!({"login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "recent": Self::normalized_recent(self.recent.clone()), "cli": self.cli, "theme": self.theme, "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}))?;
         file.sync_all()?;
         drop(file);
         fs::rename(temp, path)
@@ -166,6 +185,35 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn create_history_survives_restart_and_is_bounded() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, "{}").unwrap();
+        let mut settings = Settings::load(&path).unwrap();
+        assert!(settings.create_urls.is_empty());
+        assert!(settings.create_destination.is_empty());
+        for i in 0..12 {
+            settings.remember_create(&format!("lores://server/repo-{i}"), &format!("C:/작업/repo-{i}"));
+        }
+        settings.remember_create("  lores://server/repo-5  ", " C:/작업/repo-5 ");
+        assert_eq!(settings.create_urls.len(), 10);
+        assert_eq!(settings.create_destinations.len(), 10);
+        assert_eq!(settings.create_urls[0], "lores://server/repo-5");
+        assert_eq!(settings.create_destinations[0], "C:/작업/repo-5");
+        assert_eq!(settings.create_urls.iter().filter(|url| *url == "lores://server/repo-5").count(), 1);
+        settings.save(&path).unwrap();
+        let restored = Settings::load(&path).unwrap();
+        assert_eq!(restored.create_url, settings.create_url);
+        assert_eq!(restored.create_destination, settings.create_destination);
+        assert_eq!(restored.create_urls, settings.create_urls);
+        assert_eq!(restored.create_destinations, settings.create_destinations);
+        settings.remember_create(" ", " ");
+        assert_eq!(settings.create_urls, restored.create_urls);
+        assert_eq!(settings.create_destinations, restored.create_destinations);
+        assert!(settings.clone_urls.is_empty());
+    }
+
     #[test]
     fn pruning_recent_removes_missing_directories_and_files_and_persists() {
         let root = tempfile::tempdir().unwrap();

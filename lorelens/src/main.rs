@@ -96,6 +96,38 @@ struct Lens {
 }
 
 impl Lens {
+    fn generate_commit_message(&mut self, cx: &mut Context<Self>) {
+        if self.busy || !self.connected {
+            return;
+        }
+        let staged: Vec<_> = self.status.changes.iter().filter(|change| change.staged).collect();
+        let Some(first) = staged.first() else {
+            self.error = true;
+            self.notice = "Stage files before generating a commit message.".into();
+            cx.notify();
+            return;
+        };
+        let action = match first.action.as_str() {
+            "add" | "create" => "Add",
+            "remove" | "delete" => "Remove",
+            _ => "Update",
+        };
+        let scope = first.path.split('/').next().filter(|segment| !segment.is_empty()).unwrap_or("files");
+        let message = if staged.len() == 1 {
+            format!("{action} {}", first.path)
+        } else {
+            format!("{action} {scope} ({count} files)", count = staged.len())
+        };
+        self.message.update(cx, |input, cx| {
+            input.reset();
+            input.content = message.into();
+            cx.notify();
+        });
+        self.error = false;
+        self.notice = "Generated commit message from staged changes.".into();
+        cx.notify();
+    }
+
     fn commit_staged(&mut self, cx: &mut Context<Self>) {
         if self.busy || !self.connected || !self.status.changes.iter().any(|c| c.staged) {
             return;
@@ -606,7 +638,23 @@ impl Lens {
                 ))
             });
             let Some((staged, revert, enabled)) = state else { return menu; };
-            for unstage_only in [false, true] {
+            if !staged {
+                let view = view.clone();
+                let path = context_path.clone();
+                let root = context_root.clone();
+                menu = menu.item(PopupMenuItem::new(t("Stage"))
+                    .disabled(!enabled).on_click(move |_, _, cx| {
+                        let _ = view.update(cx, |this, cx| {
+                            if this.busy || !this.connected || this.root != root
+                                || !this.status.changes.iter().any(|c| c.path == path && !c.staged) {
+                                return;
+                            }
+                            this.command(vec!["stage".into(), "--".into(), path.clone()],
+                                "Stage", false, true, cx);
+                        });
+                    }));
+            }
+            for unstage_only in [true, false] {
                 if (unstage_only && !staged) || (!unstage_only && !revert) { continue; }
                 let view = view.clone();
                 let path = context_path.clone();

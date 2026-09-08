@@ -1,6 +1,101 @@
 use super::*;
 
 impl Lens {
+    pub(super) fn create_repository_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy { return; }
+        let url = cx.new(|cx| TextInput::new("lores://server:port/repository", cx));
+        let destination = cx.new(|cx| TextInput::new("Absolute destination path", cx));
+        url.update(cx, |input, _| input.content = self.settings.create_url.clone().into());
+        destination.update(cx, |input, _| input.content = self.settings.create_destination.clone().into());
+        let urls = self.settings.create_urls.clone();
+        let destinations = self.settings.create_destinations.clone();
+        let validation = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        let view = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let url_input = url.clone();
+            let destination_input = destination.clone();
+            let validation = validation.clone();
+            let validation_text = t(&validation.borrow());
+            let view = view.clone();
+            let close_view = view.clone();
+            let close_url = url.clone();
+            let close_destination = destination.clone();
+            dialog.title(t("Create repository")).confirm()
+                .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Create")))
+                .child(div().flex().flex_col().gap_2()
+                    .child(t("Create a remote repository and its local workspace. Log in to the server first."))
+                    .child(t("Repository URL"))
+                    .child(Self::history_input("create-url-history", url.clone(), urls.clone()))
+                    .child(t("Destination Path"))
+                    .child(Self::history_input("create-path-history", destination.clone(), destinations.clone()))
+                    .child(validation_text))
+                .on_close(move |_, _, cx| {
+                    let _ = close_view.update(cx, |this, cx| {
+                        this.settings.remember_create(
+                            &close_url.read(cx).content,
+                            &close_destination.read(cx).content,
+                        );
+                        this.save_settings();
+                    });
+                })
+                .on_ok(move |_, window, cx| {
+                    let remote = url_input.read(cx).content.trim().to_owned();
+                    let path = PathBuf::from(destination_input.read(cx).content.trim());
+                    let error = if !remote.contains("://") || remote.ends_with("://") || remote.chars().any(char::is_whitespace) {
+                        Some("Enter a repository URL including its scheme and repository name.")
+                    } else if !path.is_absolute() {
+                        Some("Enter an absolute destination path.")
+                    } else { None };
+                    if let Some(error) = error {
+                        *validation.borrow_mut() = error.into();
+                        window.refresh();
+                        return false;
+                    }
+                    view.update(cx, |this, cx| {
+                        if this.busy { return false; }
+                        this.settings.remember_create(&remote, &destination_input.read(cx).content);
+                        if !this.save_settings() {
+                            *validation.borrow_mut() = "Could not save settings · see command log".into();
+                            window.refresh();
+                            return false;
+                        }
+                        this.busy = true;
+                        this.error = false;
+                        this.notice = "Creating repository…".into();
+                        let cli = this.cli.clone();
+                        let identity = this.settings.identity.clone();
+                        let target = path.clone();
+                        let task = cx.background_executor().spawn(async move {
+                            backend::create_repository(&cli, &remote, &target, identity.as_deref())
+                        });
+                        cx.spawn(async move |this, cx| {
+                            let result = task.await;
+                            let _ = this.update(cx, |this, cx| {
+                                this.busy = false;
+                                this.show_log = false;
+                                match result {
+                                    Ok(output) => {
+                                        this.log(output);
+                                        this.open_repository(path, cx);
+                                    }
+                                    Err(error) => {
+                                        this.error = true;
+                                        this.notice = "Create failed — see details".into();
+                                        this.output_title = "Create failed".into();
+                                        this.output = t(&error);
+                                        this.log(error);
+                                    }
+                                }
+                                cx.notify();
+                            });
+                        }).detach();
+                        cx.notify();
+                        true
+                    }).unwrap_or(false)
+                })
+        });
+    }
+
     pub(super) fn revert_dialog(&mut self, path: String, unstage_only: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.busy || !self.connected { return; }
         let Some(change) = self.status.changes.iter().find(|change| change.path == path) else { return; };
@@ -472,16 +567,17 @@ impl Lens {
         if self.busy {
             return;
         }
-        let Some(remote) = self.settings.clone_remote() else {
-            self.error = true;
-            self.notice = "Cannot determine the account remote URL. Use Account > Login to select the server, then retry Clone.".into();
-            self.output_title = "Clone repository".into();
-            self.output = t(&self.notice);
-            self.show_log = false;
-            cx.notify();
-            return;
-        };
+        let remote = self.settings.clone_remote().unwrap_or_else(|| self.settings.clone_url.clone());
         self.settings.remember_clone();
+        let mut urls = self.settings.clone_urls.clone();
+        for url in std::iter::once(&remote).chain(self.settings.login_urls.iter()) {
+            if !url.trim().is_empty() && !urls.contains(url) { urls.push(url.clone()); }
+        }
+        let url = cx.new(|cx| {
+            let mut input = TextInput::new("lores://server:port/repository", cx);
+            input.content = remote.into();
+            input
+        });
         let destinations = self.settings.clone_destinations.clone();
         let destination = cx.new(|cx| TextInput::new("Absolute destination path", cx));
         destination.update(cx, |input, _| {
@@ -498,7 +594,7 @@ impl Lens {
         let validation = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
         let view = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _, _| {
-            let remote = remote.clone();
+            let url_input = url.clone();
             let destination_input = destination.clone();
             let validation = validation.clone();
             let validation_text = validation.borrow().clone();
@@ -518,6 +614,8 @@ impl Lens {
                         .flex()
                         .flex_col()
                         .gap_2()
+                        .child(t("Server URL"))
+                        .child(Self::history_input("clone-server-history", url.clone(), urls.clone()))
                         .child(t("Destination Path"))
                         .child(Self::history_input(
                             "clone-path-history",
@@ -535,7 +633,15 @@ impl Lens {
                     });
                 })
                 .on_ok(move |_, window, cx| {
-                    let remote = remote.clone();
+                    let remote = url_input.read(cx).content.trim().to_owned();
+                    let valid_url = remote.split_once("://").is_some_and(|(_, rest)| {
+                        rest.split_once('/').is_some_and(|(host, repository)| !host.is_empty() && !repository.trim_matches('/').is_empty())
+                    }) && !remote.chars().any(char::is_whitespace);
+                    if !valid_url {
+                        *validation.borrow_mut() = t("Enter a server URL including the repository name.");
+                        window.refresh();
+                        return false;
+                    }
                     let path = PathBuf::from(destination_input.read(cx).content.trim());
                     if !path.is_absolute() {
                         *validation.borrow_mut() =
@@ -548,6 +654,10 @@ impl Lens {
                             return false;
                         }
                         this.busy = true;
+                        this.settings.clone_url = remote.clone();
+                        this.settings.clone_destination = path.to_string_lossy().into_owned();
+                        this.settings.remember_clone();
+                        this.save_settings();
                         this.notice = "Cloning repository…".into();
                         let cli = this.cli.clone();
                         let identity = this.settings.identity.clone();

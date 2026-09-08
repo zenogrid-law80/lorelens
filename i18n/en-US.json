@@ -1,4 +1,10 @@
 {
+  "Generate message": "Generate message",
+  "Stage files before generating a commit message.": "Stage files before generating a commit message.",
+  "Generated commit message from staged changes.": "Generated commit message from staged changes.",
+  "Enter a server URL including the repository name.": "Enter a server URL including the repository name.",
+  "Stage folder": "Stage folder",
+  "Unstage folder": "Unstage folder",
   "Logout": "Logout",
   "Logged out": "Logged out",
   "Log out all Lore CLI accounts on this device? URL history and local repositories will be kept.": "Log out all Lore CLI accounts on this device? URL history and local repositories will be kept.",
@@ -189,5 +195,12 @@
   "Revert file…": "Revert file…",
   "Revert file": "Revert file",
   "Remove this file from staging? Local file changes will be kept.": "Remove this file from staging? Local file changes will be kept.",
-  "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.": "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted."
+  "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.": "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.",
+  "Create repository…": "Create repository…",
+  "Create repository": "Create repository",
+  "Create a remote repository and its local workspace. Log in to the server first.": "Create a remote repository and its local workspace. Log in to the server first.",
+  "Enter a repository URL including its scheme and repository name.": "Enter a repository URL including its scheme and repository name.",
+  "Creating repository…": "Creating repository…",
+  "Create failed — see details": "Create failed — see details",
+  "Create failed": "Create failed"
 }

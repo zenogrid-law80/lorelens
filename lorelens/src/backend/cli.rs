@@ -54,7 +54,10 @@ pub fn run_as(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     // An explicit login URL and clone destination do not require a local repository.
-    if is_repository(root) && args.first().is_none_or(|arg| arg != "clone") {
+    if is_repository(root)
+        && args.first().is_none_or(|arg| arg != "clone")
+        && !args.iter().any(|arg| arg == "--repository")
+    {
         command.arg("--repository").arg(root);
     }
     if json {
