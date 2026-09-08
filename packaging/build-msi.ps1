@@ -29,7 +29,7 @@ if (-not (Test-Path $WixTool)) {
 
 New-Item -ItemType Directory -Force $OutputDir | Out-Null
 $WixSource = Join-Path $PSScriptRoot 'Package.wxs'
-$MsiPath = Join-Path $OutputDir 'LoreLens-0.1.0.msi'
+$MsiPath = Join-Path $OutputDir 'LoreLens-0.1.1.msi'
 & $WixTool build $WixSource -d "ExePath=$ExePath" -d "LoreCliPath=$LoreCliPath" -o $MsiPath
 if ($LASTEXITCODE -ne 0) { throw "WiX failed with exit code $LASTEXITCODE" }
 
