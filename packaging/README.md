@@ -7,9 +7,16 @@ bash packaging/build-macos.sh
 open dist/LoreLens.app
 ```
 
-`dist/LoreLens.app`에 실행 파일과 `favicon.png`에서 생성한 다중 해상도 ICNS 아이콘을 포함합니다. 로컬 실행을 위한 ad-hoc 서명을 적용하며, 외부 배포용 Developer ID 서명과 공증은 별도입니다. Lore CLI는 앱의 **Locate CLI…**에서 선택합니다.
+`dist/LoreLens.app`에 실행 파일, macOS Lore CLI, `favicon.ico`에서 생성한 다중 해상도 ICNS 아이콘을 포함합니다. 로컬 실행을 위한 ad-hoc 서명을 적용하며, 외부 배포용 Developer ID 서명과 공증은 별도입니다.
 
-빠른 개발 빌드는 `bash packaging/build-macos.sh debug`로 만듭니다. `cargo run`으로 직접 실행해도 내장 PNG를 사용해 Dock 아이콘을 설정합니다.
+빠른 개발 빌드는 `bash packaging/build-macos.sh debug`로 만듭니다. `cargo run`으로 직접 실행해도 내장 아이콘을 사용해 Dock 아이콘을 설정합니다.
+
+DMG 설치 이미지는 다음 명령으로 생성합니다. 앱을 Applications 폴더로 드래그해 설치할 수 있으며, 출력 파일명에 빌드한 Mac의 아키텍처가 포함됩니다.
+
+```bash
+bash packaging/build-dmg.sh
+# Apple Silicon: dist/LoreLens-0.1.0-macos-arm64.dmg
+```
 
 # MSI 패키지 만들기
 
