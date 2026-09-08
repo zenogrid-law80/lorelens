@@ -576,7 +576,10 @@ impl Lens {
 
     fn change_row(&self, index: usize, change: &Change, cx: &mut Context<Self>) -> Stateful<Div> {
         let path = change.path.clone();
-        self.row(
+        let context_path = path.clone();
+        let context_root = self.root.clone();
+        let view = cx.entity().downgrade();
+        div().id(("pending-context", index)).child(self.row(
             index,
             &change.path,
             &change.action,
@@ -591,6 +594,32 @@ impl Lens {
             cx,
         )
         .on_click(cx.listener(move |this, _, _, cx| this.select(path.clone(), cx)))
+        .context_menu(move |mut menu, _, cx| {
+            let state = view.upgrade().and_then(|entity| {
+                let lens = entity.read(cx);
+                if lens.root != context_root { return None; }
+                lens.status.changes.iter().find(|c| c.path == context_path).map(|c| (
+                    c.staged,
+                    c.staged || c.file_marker() == "M" || matches!(c.action.as_str(), "modify" | "remove" | "delete")
+                        || matches!(lens.root.join(&context_path).try_exists(), Ok(false)),
+                    !lens.busy && lens.connected,
+                ))
+            });
+            let Some((staged, revert, enabled)) = state else { return menu; };
+            for unstage_only in [false, true] {
+                if (unstage_only && !staged) || (!unstage_only && !revert) { continue; }
+                let view = view.clone();
+                let path = context_path.clone();
+                let root = context_root.clone();
+                menu = menu.item(PopupMenuItem::new(t(if unstage_only { "Unstage…" } else { "Revert file…" }))
+                    .disabled(!enabled).on_click(move |_, window, cx| {
+                        let _ = view.update(cx, |this, cx| {
+                            if this.root == root { this.revert_dialog(path.clone(), unstage_only, window, cx); }
+                        });
+                    }));
+            }
+            menu
+        }))
     }
 
     fn row(

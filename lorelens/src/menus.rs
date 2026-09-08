@@ -8,7 +8,6 @@ impl Lens {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let view = cx.entity().downgrade();
-        let recent = self.settings.recent.clone();
         let ready = !self.busy;
         let file = ready && self.connected && self.selection.current.is_some();
         let commit = ready && self.connected && self.status.changes.iter().any(|c| c.staged);
@@ -143,6 +142,13 @@ impl Lens {
                     );
                 }
                 if kind == "Repository" {
+                    let recent = view.update(cx, |this, cx| {
+                        if this.settings.prune_recent() {
+                            this.save_settings();
+                            cx.notify();
+                        }
+                        this.settings.recent.clone()
+                    }).unwrap_or_default();
                     menu = menu.separator().label(t("Recent repositories"));
                     for path in &recent {
                         let view = view.clone();
@@ -152,6 +158,17 @@ impl Lens {
                                 .disabled(!ready)
                                 .on_click(move |_, _, cx| {
                                     let _ = view.update(cx, |this, cx| {
+                                        if this.busy { return; }
+                                        if matches!(path.try_exists(), Ok(false)) {
+                                            this.settings.recent.retain(|entry| entry != &path);
+                                            if this.save_settings() {
+                                                this.error = false;
+                                                this.notice = tf("Removed missing repository from recent list: {path}",
+                                                    &[("path", path.display().to_string())]);
+                                            }
+                                            cx.notify();
+                                            return;
+                                        }
                                         this.open_repository(path.clone(), cx)
                                     });
                                 }),

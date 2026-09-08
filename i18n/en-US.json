@@ -172,5 +172,22 @@
   "No pending changes. Refresh to scan for edits.": "No pending changes. Refresh to scan for edits.",
   "Open a Lore repository and Refresh to view pending changes.": "Open a Lore repository and Refresh to view pending changes.",
   "LoreLens — Desktop repository client": "LoreLens — Desktop repository client",
-  "Preview unavailable: {error}\nUse Diff or File history for removed files.": "Preview unavailable: {error}\nUse Diff or File history for removed files."
+  "Preview unavailable: {error}\nUse Diff or File history for removed files.": "Preview unavailable: {error}\nUse Diff or File history for removed files.",
+  "Delete…": "Delete…",
+  "Delete": "Delete",
+  "Permanently delete this item? Folders and all their contents will be deleted. This does not use the Recycle Bin.": "Permanently delete this item? Folders and all their contents will be deleted. This does not use the Recycle Bin.",
+  "Deleting…": "Deleting…",
+  "Delete completed": "Delete completed",
+  "Item deleted. Refreshing file list and repository status.": "Item deleted. Refreshing file list and repository status.",
+  "Delete failed — see details": "Delete failed — see details",
+  "Delete failed": "Delete failed",
+  "Deleting symbolic links or junctions is not supported.": "Deleting symbolic links or junctions is not supported.",
+  "Delete must stay inside the repository.": "Delete must stay inside the repository.",
+  "Cannot delete repository root or metadata.": "Cannot delete repository root or metadata.",
+  "Removed missing repository from recent list: {path}": "Removed missing repository from recent list: {path}",
+  "Unstage…": "Unstage…",
+  "Revert file…": "Revert file…",
+  "Revert file": "Revert file",
+  "Remove this file from staging? Local file changes will be kept.": "Remove this file from staging? Local file changes will be kept.",
+  "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.": "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted."
 }

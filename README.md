@@ -108,3 +108,7 @@ Choose English, 한국어, or 简体中文 from **View → Language**. English i
 - `lorelens/src/i18n.rs`: translation lookup, locale switching, and interpolation.
 
 Catalogs are flat JSON files keyed by the English UI text. Placeholder names such as `{count}` and `{path}` must remain unchanged, though their order may change. Missing translations fall back to English, and unknown locale settings fall back to `en-US`. Catalogs are embedded at build time, so changes require a rebuild.
+
+왼쪽 파일·디렉토리 우클릭 → **삭제…**에서 대상 경로를 확인한 뒤 영구 삭제합니다. 폴더 내부도 함께 삭제되며 휴지통을 사용하지 않습니다. 완료 후 파일 목록과 저장소 상태가 갱신됩니다. 저장소 루트·메타데이터 및 심볼릭 링크/정션의 직접 삭제는 차단됩니다.
+
+메인 **대기 중인 변경** 목록에서 삭제되었거나 스테이지된 파일을 우클릭하면 **파일 되돌리기…**를 사용할 수 있습니다. 확인 후 현재 커밋 상태로 복원하며, 로컬 수정 및 스테이지 변경은 취소되고 신규 추가 파일은 삭제됩니다. 스테이지된 파일에는 로컬 변경을 유지하는 **스테이지 해제…**도 표시됩니다. 완료 후 목록과 저장소 상태를 새로고침합니다.

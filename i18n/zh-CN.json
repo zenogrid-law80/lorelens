@@ -172,5 +172,22 @@
   "No pending changes. Refresh to scan for edits.": "没有待提交的更改。刷新以扫描修改。",
   "Open a Lore repository and Refresh to view pending changes.": "打开 Lore 仓库并刷新以查看待提交的更改。",
   "LoreLens — Desktop repository client": "LoreLens — 桌面仓库客户端",
-  "Preview unavailable: {error}\nUse Diff or File history for removed files.": "预览不可用：{error}\n对于已移除的文件，请使用“差异”或“文件历史”。"
+  "Preview unavailable: {error}\nUse Diff or File history for removed files.": "预览不可用：{error}\n对于已移除的文件，请使用“差异”或“文件历史”。",
+  "Delete…": "删除…",
+  "Delete": "删除",
+  "Permanently delete this item? Folders and all their contents will be deleted. This does not use the Recycle Bin.": "要永久删除此项目吗？文件夹及其全部内容将被删除，不会移入回收站。",
+  "Deleting…": "正在删除…",
+  "Delete completed": "删除完成",
+  "Item deleted. Refreshing file list and repository status.": "项目已删除。正在刷新文件列表和仓库状态。",
+  "Delete failed — see details": "删除失败 · 请查看详情",
+  "Delete failed": "删除失败",
+  "Deleting symbolic links or junctions is not supported.": "不支持删除符号链接或联接点。",
+  "Delete must stay inside the repository.": "只能删除仓库内部的项目。",
+  "Cannot delete repository root or metadata.": "无法删除仓库根目录或元数据。",
+  "Removed missing repository from recent list: {path}": "已从最近列表中移除不存在的仓库：{path}",
+  "Unstage…": "取消暂存…",
+  "Revert file…": "还原文件…",
+  "Revert file": "还原文件",
+  "Remove this file from staging? Local file changes will be kept.": "要取消暂存此文件吗？本地文件更改将被保留。",
+  "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.": "要将此文件还原到当前已提交的修订吗？已删除的文件将恢复，暂存的更改将被丢弃。本地修改将丢失，新添加的文件将被删除。"
 }

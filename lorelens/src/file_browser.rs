@@ -443,6 +443,13 @@ impl Lens {
                                 menu
                             };
                             let move_view = view.clone();
+                            let delete_view = view.clone();
+                            let delete_path = context_path.clone();
+                            let delete_root = context_root.clone();
+                            let delete_enabled = view.upgrade().is_some_and(|entity| {
+                                let lens = entity.read(cx);
+                                !lens.busy && lens.root == context_root
+                            });
                             let move_path = context_path.clone();
                             let move_root = context_root.clone();
                             let menu = menu
@@ -567,7 +574,13 @@ impl Lens {
                             } else {
                                 menu
                             };
-                            menu
+                            menu.item(PopupMenuItem::new(t("Delete…")).disabled(!delete_enabled).on_click(
+                                move |_, window, cx| {
+                                    let _ = delete_view.update(cx, |this, cx| {
+                                        if this.root == delete_root { this.delete_dialog(delete_path.clone(), window, cx); }
+                                    });
+                                },
+                            ))
                         }),
                 ),
             );

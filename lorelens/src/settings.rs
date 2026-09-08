@@ -27,6 +27,37 @@ impl Default for Settings {
 }
 
 impl Settings {
+    fn normalize_recent_path(path: &Path) -> PathBuf {
+        #[cfg(windows)]
+        if let Some(text) = path.to_str() {
+            let text = text.replace('/', "\\");
+            if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+                return PathBuf::from(format!(r"\\{rest}"));
+            }
+            if let Some(rest) = text.strip_prefix(r"\\?\") {
+                // Only strip extended drive-path prefixes, not other device paths.
+                if rest.as_bytes().get(1) == Some(&b':') {
+                    return PathBuf::from(rest);
+                }
+            }
+            return PathBuf::from(text);
+        }
+        path.to_path_buf()
+    }
+
+    fn recent_key(path: &Path) -> PathBuf {
+        #[cfg(windows)]
+        if let Some(text) = path.to_str() {
+            return PathBuf::from(text.to_ascii_lowercase());
+        }
+        path.to_path_buf()
+    }
+
+    fn normalized_recent(paths: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
+        let mut seen = std::collections::HashSet::new();
+        paths.into_iter().map(|path| Self::normalize_recent_path(&path))
+            .filter(|path| seen.insert(Self::recent_key(path))).take(10).collect()
+    }
     /// Older settings stored login input history but no successful-login URL.
     /// Only recover an unambiguous destination; history is not proof of authentication.
     pub fn clone_remote(&self) -> Option<String> {
@@ -67,7 +98,7 @@ impl Settings {
         Ok(Self {
             login_remote: data["login_remote"].as_str().filter(|url| !url.trim().is_empty()).map(str::to_owned),
             login_urls: serde_json::from_value(data.get("login_urls").cloned().unwrap_or(json!([])))?,
-            recent: recent.into_iter().take(10).collect(),
+            recent: Self::normalized_recent(recent),
             cli,
             language: crate::i18n::normalize(data["language"].as_str().unwrap_or("en-US")).into(),
             theme: data["theme"].as_str().unwrap_or("System").to_string(),
@@ -85,9 +116,16 @@ impl Settings {
     }
 
     pub fn remember(&mut self, path: &Path) {
-        self.recent.retain(|p| p != path);
-        self.recent.insert(0, path.to_path_buf());
-        self.recent.truncate(10);
+        self.recent = Self::normalized_recent(std::iter::once(path.to_path_buf()).chain(self.recent.iter().cloned()));
+    }
+
+    pub fn prune_recent(&mut self) -> bool {
+        let before = self.recent.len();
+        self.recent.retain(|path| match fs::metadata(path) {
+            Ok(metadata) => metadata.is_dir(),
+            Err(error) => error.kind() != io::ErrorKind::NotFound,
+        });
+        self.recent.len() != before
     }
 
     pub fn remember_clone(&mut self) {
@@ -118,7 +156,7 @@ impl Settings {
         }
         let temp = path.with_extension(format!("{}.tmp", std::process::id()));
         let mut file = fs::File::create(&temp)?;
-        serde_json::to_writer_pretty(&mut file, &json!({"login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "recent": self.recent, "cli": self.cli, "theme": self.theme, "identity": self.identity, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}))?;
+        serde_json::to_writer_pretty(&mut file, &json!({"login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "recent": Self::normalized_recent(self.recent.clone()), "cli": self.cli, "theme": self.theme, "identity": self.identity, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}))?;
         file.sync_all()?;
         drop(file);
         fs::rename(temp, path)
@@ -128,6 +166,22 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pruning_recent_removes_missing_directories_and_files_and_persists() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("repository");
+        fs::create_dir(&folder).unwrap();
+        let file = root.path().join("plain-file");
+        fs::write(&file, "file").unwrap();
+        let mut settings = Settings::default();
+        settings.recent = vec![root.path().join("missing"), folder.clone(), file];
+        assert!(settings.prune_recent());
+        assert_eq!(settings.recent, vec![folder]);
+        assert!(!settings.prune_recent());
+        let path = root.path().join("settings.json");
+        settings.save(&path).unwrap();
+        assert_eq!(Settings::load(&path).unwrap().recent, settings.recent);
+    }
     #[test]
     fn clone_recovers_legacy_login_url_without_guessing_between_servers() {
         let dir = tempfile::tempdir().unwrap();
@@ -230,6 +284,26 @@ mod tests {
         fs::write(&path, r#"{"merge_tool":"p4merge"}"#).unwrap();
         assert_eq!(Settings::load(&path).unwrap().external_tool, "p4merge");
     }
+    #[test]
+    #[cfg(windows)]
+    fn recent_paths_merge_extended_drive_and_unc_spellings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, json!({"recent": [
+            r"C:\Lore", r"\\?\C:\Lore", r"c:/lore",
+            r"\\?\UNC\server\share\repo", r"\\server\share\repo",
+            r"C:\Other"
+        ]}).to_string()).unwrap();
+        let mut settings = Settings::load(&path).unwrap();
+        assert_eq!(settings.recent, vec![PathBuf::from(r"C:\Lore"),
+            PathBuf::from(r"\\server\share\repo"), PathBuf::from(r"C:\Other")]);
+        settings.remember(Path::new(r"\\?\C:\Other"));
+        assert_eq!(settings.recent[0], PathBuf::from(r"C:\Other"));
+        assert_eq!(settings.recent.len(), 3);
+        settings.save(&path).unwrap();
+        assert_eq!(Settings::load(&path).unwrap().recent, settings.recent);
+    }
+
     #[test]
     fn bounds_history_and_skips_missing_directories() {
         let mut settings = Settings::default();

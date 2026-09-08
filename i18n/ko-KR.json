@@ -172,5 +172,22 @@
   "No pending changes. Refresh to scan for edits.": "대기 중인 변경이 없습니다. 새로고침하여 변경을 확인하세요.",
   "Open a Lore repository and Refresh to view pending changes.": "Lore 저장소를 열고 새로고침하여 대기 중인 변경을 확인하세요.",
   "LoreLens — Desktop repository client": "LoreLens — 데스크톱 저장소 클라이언트",
-  "Preview unavailable: {error}\nUse Diff or File history for removed files.": "미리보기 사용 불가: {error}\n삭제된 파일은 비교 또는 파일 이력을 사용하세요."
+  "Preview unavailable: {error}\nUse Diff or File history for removed files.": "미리보기 사용 불가: {error}\n삭제된 파일은 비교 또는 파일 이력을 사용하세요.",
+  "Delete…": "삭제…",
+  "Delete": "삭제",
+  "Permanently delete this item? Folders and all their contents will be deleted. This does not use the Recycle Bin.": "이 항목을 영구 삭제하시겠습니까? 폴더는 내부의 모든 항목과 함께 삭제됩니다. 휴지통으로 이동하지 않습니다.",
+  "Deleting…": "삭제 중…",
+  "Delete completed": "삭제 완료",
+  "Item deleted. Refreshing file list and repository status.": "항목을 삭제했습니다. 파일 목록과 저장소 상태를 새로고침합니다.",
+  "Delete failed — see details": "삭제 실패 · 상세 정보를 확인하세요",
+  "Delete failed": "삭제 실패",
+  "Deleting symbolic links or junctions is not supported.": "심볼릭 링크 또는 정션 삭제는 지원하지 않습니다.",
+  "Delete must stay inside the repository.": "저장소 내부의 항목만 삭제할 수 있습니다.",
+  "Cannot delete repository root or metadata.": "저장소 루트 또는 메타데이터는 삭제할 수 없습니다.",
+  "Removed missing repository from recent list: {path}": "존재하지 않는 저장소를 최근 목록에서 제거했습니다: {path}",
+  "Unstage…": "스테이지 해제…",
+  "Revert file…": "파일 되돌리기…",
+  "Revert file": "파일 되돌리기",
+  "Remove this file from staging? Local file changes will be kept.": "이 파일의 스테이지를 해제하시겠습니까? 로컬 파일의 변경 내용은 유지됩니다.",
+  "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.": "현재 커밋된 리비전으로 되돌리시겠습니까? 삭제된 파일은 복원되고 스테이지된 변경은 취소됩니다. 로컬 수정 내용은 사라지며 새로 추가된 파일은 삭제됩니다."
 }

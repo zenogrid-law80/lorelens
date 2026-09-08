@@ -1,6 +1,117 @@
 use super::*;
 
 impl Lens {
+    pub(super) fn revert_dialog(&mut self, path: String, unstage_only: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy || !self.connected { return; }
+        let Some(change) = self.status.changes.iter().find(|change| change.path == path) else { return; };
+        if unstage_only && !change.staged { return; }
+        let root = self.root.clone();
+        let revision = self.status.revision.clone();
+        let branch = self.status.branch.clone();
+        let view = cx.entity().downgrade();
+        let title = if unstage_only { "Unstage" } else { "Revert file" };
+        let validation = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        window.open_dialog(cx, move |dialog, _, _| {
+            let path = path.clone();
+            let root = root.clone();
+            let revision = revision.clone();
+            let branch = branch.clone();
+            let view = view.clone();
+            let validation = validation.clone();
+            let error = t(&validation.borrow());
+            dialog.title(t(title)).confirm()
+                .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t(title)))
+                .child(div().flex().flex_col().gap_2()
+                    .child(root.join(&path).display().to_string())
+                    .child(t(if unstage_only {
+                        "Remove this file from staging? Local file changes will be kept."
+                    } else {
+                        "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted."
+                    }))
+                    .child(error))
+                .on_ok(move |_, window, cx| {
+                    view.update(cx, |this, cx| {
+                        if this.busy || !this.connected || this.root != root || this.status.branch != branch
+                            || this.status.revision != revision
+                            || !this.status.changes.iter().any(|c| c.path == path && (!unstage_only || c.staged)) {
+                            *validation.borrow_mut() = "Repository state changed. Reopen this dialog.".into();
+                            window.refresh();
+                            return false;
+                        }
+                        let args = if unstage_only {
+                            vec!["unstage".into(), "--".into(), path.clone()]
+                        } else {
+                            vec!["reset".into(), "--purge".into(), "--".into(), path.clone()]
+                        };
+                        this.selection.clear();
+                        this.command(args, title, false, true, cx);
+                        true
+                    }).unwrap_or(true)
+                })
+        });
+    }
+}
+
+impl Lens {
+    pub(super) fn delete_dialog(&mut self, source: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy { return; }
+        let root = self.root.clone();
+        let view = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let source = source.clone();
+            let root = root.clone();
+            let view = view.clone();
+            dialog.title(t("Delete")).confirm()
+                .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Delete")))
+                .child(div().flex().flex_col().gap_2()
+                    .child(source.display().to_string())
+                    .child(t("Permanently delete this item? Folders and all their contents will be deleted. This does not use the Recycle Bin.")))
+                .on_ok(move |_, _, cx| {
+                    let root = root.clone();
+                    let source = source.clone();
+                    view.update(cx, |this, cx| {
+                        if this.busy || this.root != root { return false; }
+                        this.busy = true;
+                        this.preview.invalidate();
+                        this.notice = "Deleting…".into();
+                        let task = cx.background_executor().spawn(async move {
+                            backend::delete_entry(&root, &source)
+                        });
+                        cx.spawn(async move |this, cx| {
+                            let result = task.await;
+                            let _ = this.update(cx, |this, cx| {
+                                this.busy = false;
+                                this.show_log = false;
+                                this.selection.clear();
+                                match result {
+                                    Ok(()) => {
+                                        this.error = false;
+                                        this.output_title = "Delete completed".into();
+                                        this.output = t("Item deleted. Refreshing file list and repository status.");
+                                        this.notice = "Delete completed".into();
+                                    }
+                                    Err(error) => {
+                                        this.error = true;
+                                        this.notice = "Delete failed — see details".into();
+                                        this.output_title = "Delete failed".into();
+                                        this.output = t(&error);
+                                        this.log(error);
+                                    }
+                                }
+                                // A failed recursive delete can still have removed some children.
+                                this.refresh(cx);
+                                cx.notify();
+                            });
+                        }).detach();
+                        cx.notify();
+                        true
+                    }).unwrap_or(true)
+                })
+        });
+    }
+}
+
+impl Lens {
     pub(super) fn logout_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.busy { return; }
         let view = cx.entity().downgrade();
