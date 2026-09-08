@@ -233,20 +233,22 @@ impl Lens {
         cx: &mut Context<Self>,
     ) -> Self {
         i18n::set_locale(&settings.language);
+        let connect_after_load = backend::is_repository(&root);
         let filter = cx.new(|cx| TextInput::new("Filter files…", cx));
         cx.observe(&filter, |_, _, cx| cx.notify()).detach();
         let mut view = Self {
             files_focus: cx.focus_handle(),
             files_scroll: ScrollHandle::new(),
             folder_to_select: None,
-            directory: root.clone(), root, cli: settings.cli.clone().unwrap_or_else(backend::find_cli), entries: vec![],
+            directory: root.clone(), root, cli: settings.cli.clone().filter(|path| path.is_file()).unwrap_or_else(backend::find_cli), entries: vec![],
             status: Status::default(), connected: false, busy: false, tab: Tab::Pending,
             locked_paths: Default::default(),
             selection: SelectionState::default(), preview: PreviewState::default(), output: "Open a folder to browse local files.\n\nFor version control, open a Lore repository and locate the Lore CLI.\nUse Sync to synchronize the current repository. Commits are not pushed automatically.".into(),
             output_title: "Welcome to LoreLens".into(), logs: vec![],
             message: cx.new(|cx| TextInput::new("Describe your staged changes…", cx)),
             filter, notice: "Opening repository…".into(), error: false, show_log: false,
-            settings, settings_error, branch_output: String::new(), show_branches: false, connect_after_load: true,
+            settings, settings_error, branch_output: String::new(), show_branches: false,
+            connect_after_load,
             refresh_pending: false,
             logged_in_account: "Not signed in".into(),
             local_branches: Vec::new(),
@@ -312,7 +314,7 @@ impl Lens {
         });
         self.output.clear();
         self.output_title = "Repository opened".into();
-        self.connect_after_load = true;
+        self.connect_after_load = backend::is_repository(&self.root);
         self.load_directory(cx);
     }
 

@@ -2,6 +2,9 @@ mod cli;
 mod filesystem;
 mod ignore;
 pub use cli::{find_cli, run_as};
+pub fn is_repository(root: &Path) -> bool {
+    root.join(".lore").is_dir() || root.join(".urc").is_dir()
+}
 pub use filesystem::{list_directory, preview};
 
 use serde_json::Value;
@@ -373,6 +376,20 @@ pub struct Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn repository_detection_requires_metadata_directory() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(!is_repository(root.path()));
+        for marker in [".lore", ".urc"] {
+            let checkout = root.path().join(marker.trim_start_matches('.'));
+            fs::create_dir(&checkout).unwrap();
+            fs::create_dir(checkout.join(marker)).unwrap();
+            assert!(is_repository(&checkout));
+        }
+        fs::write(root.path().join(".lore"), "not a repository").unwrap();
+        assert!(!is_repository(root.path()));
+    }
+
     #[test]
     fn move_preserves_contents_and_rejects_overwrite_and_self_nesting() {
         let root = tempfile::tempdir().unwrap();

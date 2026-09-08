@@ -1,4 +1,8 @@
 {
+  "Server URL": "服务器 URL",
+  "No local repository. Enter the server URL to log in, then clone a repository.": "没有本地仓库。请输入服务器 URL 登录，然后克隆仓库。",
+  "Enter a server URL including its scheme.": "请输入包含协议的服务器 URL。",
+  "Login completed. Open or clone a repository.": "登录完成。请打开或克隆仓库。",
   "Repository": "仓库",
   "Changes": "更改",
   "Tools ▾": "工具 ▾",

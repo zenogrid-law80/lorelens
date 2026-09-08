@@ -5,6 +5,7 @@ use std::{
 };
 
 pub struct Settings {
+    pub login_urls: Vec<String>,
     pub recent: Vec<PathBuf>,
     pub cli: Option<PathBuf>,
     pub theme: String,
@@ -20,7 +21,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { recent: Vec::new(), cli: None, theme: "System".into(), language: "en-US".into(), external_tool: "idea".into(), tool_paths: Default::default(), identity: None, clone_url: String::new(), clone_destination: String::new(), clone_urls: Vec::new(), clone_destinations: Vec::new() }
+        Self { login_urls: Vec::new(), recent: Vec::new(), cli: None, theme: "System".into(), language: "en-US".into(), external_tool: "idea".into(), tool_paths: Default::default(), identity: None, clone_url: String::new(), clone_destination: String::new(), clone_urls: Vec::new(), clone_destinations: Vec::new() }
     }
 }
 
@@ -49,6 +50,7 @@ impl Settings {
             serde_json::from_value(data.get("recent").cloned().unwrap_or(json!([])))?;
         let cli = serde_json::from_value(data.get("cli").cloned().unwrap_or(Value::Null))?;
         Ok(Self {
+            login_urls: serde_json::from_value(data.get("login_urls").cloned().unwrap_or(json!([])))?,
             recent: recent.into_iter().take(10).collect(),
             cli,
             language: crate::i18n::normalize(data["language"].as_str().unwrap_or("en-US")).into(),
@@ -86,13 +88,21 @@ impl Settings {
         self.recent.iter().find(|path| path.is_dir()).cloned()
     }
 
+    pub fn remember_login(&mut self, url: &str) {
+        let url = url.trim();
+        if url.is_empty() { return; }
+        self.login_urls.retain(|entry| entry != url);
+        self.login_urls.insert(0, url.into());
+        self.login_urls.truncate(10);
+    }
+
     pub fn save(&self, path: &Path) -> io::Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
         let temp = path.with_extension(format!("{}.tmp", std::process::id()));
         let mut file = fs::File::create(&temp)?;
-        serde_json::to_writer_pretty(&mut file, &json!({"language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "recent": self.recent, "cli": self.cli, "theme": self.theme, "identity": self.identity, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}))?;
+        serde_json::to_writer_pretty(&mut file, &json!({"login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "recent": self.recent, "cli": self.cli, "theme": self.theme, "identity": self.identity, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}))?;
         file.sync_all()?;
         drop(file);
         fs::rename(temp, path)
@@ -102,6 +112,29 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn login_history_survives_restart_and_deduplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut settings = Settings::default();
+        for i in 0..12 {
+            settings.remember_login(&format!("lores://server-{i}:443"));
+        }
+        settings.remember_login("  lores://server-5:443  ");
+        settings.remember_login(" ");
+        assert_eq!(settings.login_urls.len(), 10);
+        assert_eq!(settings.login_urls[0], "lores://server-5:443");
+        assert_eq!(settings.login_urls.iter().filter(|url| *url == "lores://server-5:443").count(), 1);
+        settings.save(&path).unwrap();
+        let mut restarted = Settings::load(&path).unwrap();
+        assert_eq!(restarted.login_urls, settings.login_urls);
+        restarted.theme = "Light".into();
+        restarted.save(&path).unwrap();
+        assert_eq!(Settings::load(&path).unwrap().login_urls, settings.login_urls);
+        fs::write(&path, "{}").unwrap();
+        assert!(Settings::load(&path).unwrap().login_urls.is_empty());
+    }
+
     #[test]
     fn remembers_and_restores_across_reloads() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

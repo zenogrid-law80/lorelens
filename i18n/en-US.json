@@ -1,4 +1,8 @@
 {
+  "Server URL": "Server URL",
+  "No local repository. Enter the server URL to log in, then clone a repository.": "No local repository. Enter the server URL to log in, then clone a repository.",
+  "Enter a server URL including its scheme.": "Enter a server URL including its scheme.",
+  "Login completed. Open or clone a repository.": "Login completed. Open or clone a repository.",
   "Repository": "Repository",
   "Changes": "Changes",
   "Tools ▾": "Tools ▾",

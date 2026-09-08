@@ -69,13 +69,7 @@ impl Lens {
                                         this.file_command(action, cx)
                                     }
                                     "commit" => this.commit_staged(cx),
-                                    "login" => this.command(
-                                        vec!["login".into()],
-                                        "Login",
-                                        false,
-                                        false,
-                                        cx,
-                                    ),
+                                    "login" => this.login_dialog(window, cx),
                                     "System" | "Light" | "Dark" => {
                                         this.settings.theme = action.into();
                                         apply_theme(action, Some(window), cx);

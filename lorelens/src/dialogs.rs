@@ -1,6 +1,50 @@
 use super::*;
 
 impl Lens {
+    pub(super) fn login_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy { return; }
+        let no_repository = !backend::is_repository(&self.root);
+        let history = self.settings.login_urls.clone();
+        let url = cx.new(|cx| {
+            let mut input = TextInput::new("lores://server:port", cx);
+            input.content = history.first().cloned().unwrap_or_default().into();
+            input
+        });
+        let view = cx.entity().downgrade();
+        let validation = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        window.open_dialog(cx, move |dialog, _, _| {
+            let input = url.clone();
+            let view = view.clone();
+            let validation = validation.clone();
+            let validation_text = t(&validation.borrow());
+            dialog.title(t("Login")).confirm()
+                .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Login")))
+                .child(div().flex().flex_col().gap_2()
+                    .when(no_repository, |el| el.child(t("No local repository. Enter the server URL to log in, then clone a repository.")))
+                    .child(t("Server URL"))
+                    .child(Self::history_input("login-remote-url", url.clone(), history.clone()))
+                    .child(validation_text))
+                .on_ok(move |_, window, cx| {
+                    let remote = input.read(cx).content.trim().to_owned();
+                    if !remote.contains("://") || remote.ends_with("://") || remote.chars().any(char::is_whitespace) {
+                        *validation.borrow_mut() = "Enter a server URL including its scheme.".into();
+                        window.refresh();
+                        return false;
+                    }
+                    view.update(cx, |this, cx| {
+                        if this.busy { return false; }
+                        this.settings.remember_login(&remote);
+                        if !this.save_settings() {
+                            *validation.borrow_mut() = "Could not save settings · see command log".into();
+                            window.refresh();
+                            return false;
+                        }
+                        this.command(vec!["login".into(), remote], "Login", false, false, cx);
+                        true
+                    }).unwrap_or(false)
+                })
+        });
+    }
     pub(super) fn merge_branch_dialog(
         &mut self,
         source: String,

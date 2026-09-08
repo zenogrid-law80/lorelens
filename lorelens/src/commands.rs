@@ -80,6 +80,11 @@ impl Lens {
             return;
         }
         self.refresh_pending = false;
+        if !backend::is_repository(&self.root) {
+            self.connected = false;
+            self.load_directory(cx);
+            return;
+        }
         self.command(
             vec!["status".into(), "--scan".into()],
             "Repository status",
@@ -122,7 +127,7 @@ impl Lens {
                 status || authentication || branches,
                 if login { None } else { identity.as_deref() },
             );
-            let identity_update = if authentication {
+            let identity_update = if authentication && backend::is_repository(&root) {
                 result
                     .as_ref()
                     .ok()
@@ -221,6 +226,11 @@ impl Lens {
                             this.branch_output = lines.join("\n");
                             this.notice = "Branches loaded".into();
                             this.command(vec!["auth".into(), "info".into()], "Account", false, false, cx);
+                        } else if kind == CommandKind::Login {
+                            this.notice = "Login completed. Open or clone a repository.".into();
+                            this.output = t(&this.notice);
+                            this.output_title = "Login".into();
+                            this.show_log = false;
                         } else if kind.is_authentication() {
                             match backend::parse_account(&output) {
                                 Ok((id, name)) => {
@@ -251,7 +261,9 @@ impl Lens {
                         }
                         this.log(this.notice.clone());
                         if kind == CommandKind::Login {
-                            this.refresh(cx);
+                            if backend::is_repository(&this.root) {
+                                this.refresh(cx);
+                            }
                         }
                         if status && this.connected {
                             this.command(

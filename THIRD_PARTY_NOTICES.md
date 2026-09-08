@@ -11,12 +11,6 @@ Source: https://github.com/zed-industries/zed/tree/main/crates/gpui
 Other dependencies retain their respective licenses; exact versions are recorded
 in Cargo.lock.
 
-## Based theme
-
-`lorelens/themes/based.json` is from
-https://github.com/pavi2410/based/blob/main/apps/desktop/src/theme/bundles/based.json.
-LoreLens adapts its custom controls to the same neutral palette.
-
 MIT License
 
 Copyright (c) 2026 pavi2410

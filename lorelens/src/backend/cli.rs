@@ -13,6 +13,15 @@ pub fn find_cli() -> PathBuf {
 
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
+        #[cfg(target_os = "windows")]
+        for installed in [
+            PathBuf::from(r"C:\Program Files (x86)\LoreLens\dist\lore.exe"),
+            PathBuf::from(r"C:\Program Files\LoreLens\dist\lore.exe"),
+        ] {
+            if installed.is_file() {
+                return installed;
+            }
+        }
         let bundled = std::env::current_exe()
             .ok()
             .and_then(|exe| exe.parent().map(|dir| dir.join(relative)));
@@ -40,12 +49,14 @@ pub fn run_as(
     command
         .current_dir(root)
         .args(["--no-pager", "--non-interactive"])
-        .arg("--repository")
-        .arg(root)
         .env("NO_COLOR", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // An explicit login URL and clone destination do not require a local repository.
+    if is_repository(root) && args.first().is_none_or(|arg| arg != "clone") {
+        command.arg("--repository").arg(root);
+    }
     if json {
         command.arg("--json");
     }
