@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="LoreLens documentation: menu usage and Lore CLI integration.">
+  <meta name="theme-color" content="#0b0e14"><title>LoreLens Docs — Menu usage</title>
+  <link rel="icon" href="../../favicon.ico" type="image/x-icon"><link rel="stylesheet" href="../docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="docs-header"><a class="brand" href="../../"><img class="mark" src="../../favicon.ico" alt="" width="30" height="30">LoreLens</a><nav aria-label="Documentation navigation"><a href="../../">Home</a><a href="#menu-usage">Menu usage</a><a href="#cli-api">CLI API</a></nav></header>
+<main id="main" class="docs-layout">
+  <aside class="docs-sidebar" aria-label="Documentation categories"><p class="eyebrow">DOCUMENTATION</p><a class="active" href="#menu-usage">Menu usage</a><a href="#repository">Repository</a><a href="#changes">Changes</a><a href="#tools">Tools</a><a href="#view">View &amp; account</a><a href="#cli-api">CLI API</a></aside>
+  <article class="docs-content">
+    <div class="eyebrow"><span class="dot"></span> API DOCUMENTATION</div>
+    <h1>Menu usage</h1>
+    <p class="lead">A quick reference for the LoreLens application menu and its repository actions.</p>
+
+    <section id="menu-usage"><h2>Application menu</h2><p>Use the menu bar to open repositories, manage changes, configure tools, and switch the application view.</p>
+      <div class="docs-table" role="region" aria-label="Application menu reference" tabindex="0"><table><thead><tr><th>Menu</th><th>Actions</th></tr></thead><tbody>
+        <tr id="repository"><td>Repository</td><td>Open a local repository, clone a repository, and select a recent repository. Entries whose folders no longer exist are removed when the menu opens.</td></tr>
+        <tr id="changes"><td>Changes</td><td>Stage or unstage the selected file, commit staged changes, open file history, and inspect commits waiting to be pushed.</td></tr>
+        <tr id="tools"><td>Tools</td><td>Select the shared diff and merge tool, locate its executable, use PATH lookup, or select the Lore CLI executable.</td></tr>
+        <tr id="view"><td>View</td><td>Choose System, Light, or Dark theme; open the command log; and select the UI language.</td></tr>
+        <tr><td>Account</td><td>Log in, log out, and view the current account.</td></tr>
+      </tbody></table></div>
+    </section>
+
+    <section><h2>File context menus</h2><p>Right-click a file or folder in the file browser for filesystem actions. The exact actions depend on the selected item and its repository state.</p>
+      <ul><li><strong>Diff</strong> is shown for modified files and opens the configured external comparison tool.</li><li><strong>Stage / Unstage</strong> changes the staging state of tracked files.</li><li><strong>Discard</strong> resets a changed file to the current revision.</li><li><strong>Move</strong> moves a file or folder within the repository.</li><li><strong>Delete</strong> permanently deletes the selected file or folder after confirmation. Repository metadata and symbolic links are protected.</li></ul>
+    </section>
+
+    <section id="changes"><h2>Pending changes menu</h2><p>Right-click an entry in <em>Pending changes</em> to recover a working copy.</p>
+      <div class="callout"><strong>Revert file</strong> restores a modified or deleted file to the current committed revision. It discards staged and local edits; a newly added file may be deleted. <strong>Unstage</strong> removes a staged file from staging while keeping its local changes.</div>
+    </section>
+
+    <section id="cli-api"><h2>CLI API</h2><p>LoreLens invokes the Lore CLI with the opened repository as its working directory and passes <code>--repository</code>. Commands that report structured status use <code>--json</code>.</p>
+      <div class="docs-table" role="region" aria-label="Lore CLI commands" tabindex="0"><table><thead><tr><th>Operation</th><th>CLI command</th></tr></thead><tbody>
+        <tr><td>Refresh status</td><td><code>lore status --scan --json</code></td></tr>
+        <tr><td>Stage / unstage</td><td><code>lore stage -- &lt;path&gt;</code> / <code>lore unstage -- &lt;path&gt;</code></td></tr>
+        <tr><td>Restore file</td><td><code>lore reset --purge -- &lt;path&gt;</code></td></tr>
+        <tr><td>Synchronize / push</td><td><code>lore sync</code> / <code>lore push</code></td></tr>
+      </tbody></table></div>
+      <p class="note">CLI arguments, raw command output, file paths, and external tool names are preserved as supplied; the UI does not translate them.</p>
+    </section>
+  </article>
+</main>
+<footer class="docs-footer"><span>LoreLens by zenogrid</span><a href="https://github.com/zenogrid-law80/lorelens" target="_blank" rel="noopener noreferrer">View on GitHub ↗</a></footer>
+</body></html>
