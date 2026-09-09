@@ -1,6 +1,74 @@
 use super::ignore::{load_loreignore, loreignored};
 use super::*;
 
+/// Copy external entries without overwriting existing data or following links.
+pub fn copy_entries(root: &Path, destination: &Path, sources: &[PathBuf]) -> Result<usize, String> {
+    fn metadata(path: &Path) -> Result<fs::Metadata, String> {
+        let meta = fs::symlink_metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let link = meta.file_type().is_symlink();
+        #[cfg(windows)]
+        let link = {
+            use std::os::windows::fs::MetadataExt;
+            link || meta.file_attributes() & 0x400 != 0
+        };
+        if link || !(meta.is_file() || meta.is_dir()) {
+            return Err(format!("Unsupported link or special file: {}", path.display()));
+        }
+        Ok(meta)
+    }
+    fn plan(source: &Path, target: &Path, entries: &mut Vec<(PathBuf, PathBuf, bool)>) -> Result<(), String> {
+        let meta = metadata(source)?;
+        if fs::symlink_metadata(target).is_ok() || entries.iter().any(|(_, p, _)| p == target) {
+            return Err(format!("Destination already exists: {}", target.display()));
+        }
+        if target.file_name().is_some_and(|name| [".git", ".lore", ".urc"].iter().any(|n| name.eq_ignore_ascii_case(n))) {
+            return Err("Cannot copy repository metadata.".into());
+        }
+        entries.push((source.to_path_buf(), target.to_path_buf(), meta.is_dir()));
+        if meta.is_dir() {
+            for child in fs::read_dir(source).map_err(|e| e.to_string())? {
+                let child = child.map_err(|e| e.to_string())?;
+                plan(&child.path(), &target.join(child.file_name()), entries)?;
+            }
+        }
+        Ok(())
+    }
+    let root = root.canonicalize().map_err(|e| e.to_string())?;
+    let destination = destination.canonicalize().map_err(|e| e.to_string())?;
+    let relative = destination.strip_prefix(&root).map_err(|_| "Copy must stay inside the repository.")?;
+    if !destination.is_dir() || relative.components().any(|part| {
+        [".git", ".lore", ".urc"].iter().any(|name| part.as_os_str().eq_ignore_ascii_case(name))
+    }) {
+        return Err("Invalid copy destination.".into());
+    }
+    let mut entries = Vec::new();
+    for source in sources {
+        metadata(source)?;
+        let canonical = source.canonicalize().map_err(|e| e.to_string())?;
+        if destination.starts_with(&canonical) {
+            return Err("Cannot copy a folder into itself or its descendants.".into());
+        }
+        let name = source.file_name().ok_or("Cannot copy a filesystem root.")?;
+        plan(source, &destination.join(name), &mut entries)?;
+    }
+    // Validate the entire batch before creating anything. Exclusive creation also
+    // protects against destinations appearing between validation and copying.
+    for (source, target, directory) in entries {
+        let result = if directory {
+            fs::create_dir(&target)
+        } else {
+            (|| {
+                let mut input = fs::File::open(&source)?;
+                let mut output = fs::OpenOptions::new().write(true).create_new(true).open(&target)?;
+                std::io::copy(&mut input, &mut output)?;
+                fs::set_permissions(&target, input.metadata()?.permissions())
+            })()
+        };
+        result.map_err(|e| format!("Copy failed at {}: {e}. Some entries may have been copied.", target.display()))?;
+    }
+    Ok(sources.len())
+}
+
 pub fn delete_entry(root: &Path, source: &Path) -> Result<(), String> {
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let metadata = fs::symlink_metadata(source).map_err(|e| e.to_string())?;
@@ -21,6 +89,51 @@ pub fn delete_entry(root: &Path, source: &Path) -> Result<(), String> {
     // remove_dir_all removes links within the tree without following their targets.
     if metadata.is_dir() { fs::remove_dir_all(&source) } else { fs::remove_file(&source) }
         .map_err(|e| format!("Delete failed: {e}"))
+}
+
+#[cfg(test)]
+mod copy_tests {
+    use super::*;
+
+    #[test]
+    fn copies_multiple_files_and_nested_folders_preserving_sources() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let folder = source.path().join("한글 folder");
+        fs::create_dir_all(folder.join("empty")).unwrap();
+        fs::write(folder.join("nested.txt"), "nested").unwrap();
+        let file = source.path().join("file.txt");
+        fs::write(&file, "file").unwrap();
+        assert_eq!(copy_entries(root.path(), root.path(), &[file.clone(), folder.clone()]).unwrap(), 2);
+        assert_eq!(fs::read(root.path().join("file.txt")).unwrap(), b"file");
+        assert_eq!(fs::read(root.path().join("한글 folder/nested.txt")).unwrap(), b"nested");
+        assert!(root.path().join("한글 folder/empty").is_dir());
+        assert!(file.exists() && folder.join("nested.txt").exists());
+    }
+
+    #[test]
+    fn rejects_conflicts_before_copying_any_item() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        fs::write(source.path().join("new"), "new").unwrap();
+        fs::write(source.path().join("keep"), "replacement").unwrap();
+        fs::write(root.path().join("keep"), "original").unwrap();
+        assert!(copy_entries(root.path(), root.path(), &[source.path().join("new"), source.path().join("keep")]).is_err());
+        assert!(!root.path().join("new").exists());
+        assert_eq!(fs::read(root.path().join("keep")).unwrap(), b"original");
+    }
+
+    #[test]
+    fn rejects_recursive_outside_and_metadata_destinations() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let folder = root.path().join("folder");
+        fs::create_dir_all(folder.join("child")).unwrap();
+        assert!(copy_entries(root.path(), &folder.join("child"), &[folder.clone()]).is_err());
+        assert!(copy_entries(root.path(), outside.path(), &[folder.clone()]).is_err());
+        fs::create_dir(root.path().join(".git")).unwrap();
+        assert!(copy_entries(root.path(), &root.path().join(".git"), &[folder]).is_err());
+    }
 }
 
 #[cfg(test)]

@@ -63,7 +63,9 @@ enum Tab {
 
 struct Lens {
     files_focus: FocusHandle,
+    pending_focus: FocusHandle,
     files_scroll: ScrollHandle,
+    pending_scroll: UniformListScrollHandle,
     folder_to_select: Option<PathBuf>,
     root: PathBuf,
     directory: PathBuf,
@@ -84,6 +86,7 @@ struct Lens {
     notice: String,
     error: bool,
     show_log: bool,
+    obliterate_enabled: bool,
     settings: settings::Settings,
     settings_error: Option<String>,
     branch_output: String,
@@ -277,7 +280,9 @@ impl Lens {
         cx.observe(&filter, |_, _, cx| cx.notify()).detach();
         let mut view = Self {
             files_focus: cx.focus_handle(),
+            pending_focus: cx.focus_handle(),
             files_scroll: ScrollHandle::new(),
+            pending_scroll: UniformListScrollHandle::new(),
             folder_to_select: None,
             directory: root.clone(), root, cli: settings.cli.clone().filter(|path| path.is_file()).unwrap_or_else(backend::find_cli), entries: vec![],
             status: Status::default(), connected: false, busy: false, tab: Tab::Pending,
@@ -285,7 +290,7 @@ impl Lens {
             selection: SelectionState::default(), preview: PreviewState::default(), output: "Open a folder to browse local files.\n\nFor version control, open a Lore repository and locate the Lore CLI.\nUse Sync to synchronize the current repository. Commits are not pushed automatically.".into(),
             output_title: "Welcome to LoreLens".into(), logs: vec![],
             message: cx.new(|cx| TextInput::new("Describe your staged changes…", cx)),
-            filter, notice: "Opening repository…".into(), error: false, show_log: false,
+            filter, notice: "Opening repository…".into(), error: false, show_log: false, obliterate_enabled: false,
             settings, settings_error, branch_output: String::new(), show_branches: false,
             connect_after_load,
             startup_login_pending: false,
@@ -509,7 +514,7 @@ impl Lens {
         .detach();
     }
 
-    fn file_command(&mut self, command: &str, cx: &mut Context<Self>) {
+    fn file_command(&mut self, command: &str, window: &mut Window, cx: &mut Context<Self>) {
         if command == "diff" {
             if let Some(path) = self.selection.current.clone() {
                 self.external_diff(path, cx);
@@ -520,6 +525,13 @@ impl Lens {
             return;
         }
         if let Some(path) = self.selection.current.clone() {
+            let mut targets: Vec<_> = self.selection.paths.iter().cloned().collect();
+            if targets.is_empty() { targets.push(path.clone()); }
+            targets.sort();
+            if matches!(command, "stage" | "unstage") && targets.iter().any(|path| self.root.join(path).is_dir()) {
+                self.folder_changes_dialog(targets, if command == "stage" { "stage" } else { "unstage" }, window, cx);
+                return;
+            }
             let args = match command {
                 "history" => vec![
                     "file".into(),
@@ -612,6 +624,13 @@ impl Lens {
             .when(id == "commit", |button| button.primary())
     }
 
+    fn pending_paths_valid(&self, paths: &[String], staged: Option<bool>) -> bool {
+        let eligible: std::collections::HashSet<_> = self.status.changes.iter()
+            .filter(|change| staged.is_none_or(|staged| change.staged == staged))
+            .map(|change| change.path.as_str()).collect();
+        !paths.is_empty() && paths.iter().all(|path| eligible.contains(path.as_str()))
+    }
+
     fn change_row(&self, index: usize, change: &Change, cx: &mut Context<Self>) -> Stateful<Div> {
         let path = change.path.clone();
         let context_path = path.clone();
@@ -631,65 +650,93 @@ impl Lens {
             change.size,
             cx,
         )
-        .on_click(cx.listener(move |this, _, _, cx| this.select(path.clone(), cx)))
+        .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+            window.focus(&this.pending_focus);
+            if this.busy { return; }
+            let modifiers = event.modifiers();
+            let additive = modifiers.control || modifiers.platform;
+            if !additive && !modifiers.shift {
+                this.select(path.clone(), cx);
+                return;
+            }
+            let visible: Vec<_> = this.status.changes.iter().map(|c| c.path.clone()).collect();
+            // Selection shared with the file browser must stay within this list.
+            let visible_set: std::collections::HashSet<_> = visible.iter().collect();
+            this.selection.paths.retain(|p| visible_set.contains(p));
+            this.selection.click(path.clone(), &visible, additive, modifiers.shift);
+            this.preview.invalidate();
+            this.notice = tf("{count} items selected", &[("count", this.selection.paths.len().to_string())]);
+            cx.notify();
+        }))
         .context_menu(move |mut menu, _, cx| {
-            let copy_path = context_root.join(&context_path);
-            menu = menu.item(PopupMenuItem::new(t("Copy full path")).on_click(
-                move |_, _, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(
-                        copy_path.to_string_lossy().into_owned(),
-                    ));
-                },
-            )).separator();
-            let state = view.upgrade().and_then(|entity| {
+            let Some((paths, stage_paths, unstage_paths, revert, enabled)) = view.upgrade().and_then(|entity| {
                 let lens = entity.read(cx);
                 if lens.root != context_root { return None; }
-                lens.status.changes.iter().find(|c| c.path == context_path).map(|c| (
-                    c.staged,
-                    c.staged || c.file_marker() == "M" || matches!(c.action.as_str(), "modify" | "remove" | "delete")
-                        || matches!(lens.root.join(&context_path).try_exists(), Ok(false)),
-                    !lens.busy && lens.connected,
-                ))
-            });
-            let Some((staged, revert, enabled)) = state else { return menu; };
-            if !staged {
+                let use_selection = lens.selection.paths.contains(&context_path);
+                let mut paths = Vec::new();
+                let mut stage_paths = Vec::new();
+                let mut unstage_paths = Vec::new();
+                let mut revert = false;
+                for change in &lens.status.changes {
+                    if !(if use_selection { lens.selection.paths.contains(&change.path) }
+                        else { change.path == context_path }) { continue; }
+                    paths.push(change.path.clone());
+                    if change.staged { unstage_paths.push(change.path.clone()); }
+                    else { stage_paths.push(change.path.clone()); }
+                    revert |= change.staged || change.file_marker() == "M"
+                        || matches!(change.action.as_str(), "modify" | "remove" | "delete");
+                }
+                if paths.is_empty() { return None; }
+                let revert = revert || paths.len() > 1
+                    || matches!(lens.root.join(&paths[0]).try_exists(), Ok(false));
+                Some((paths, stage_paths, unstage_paths, revert, !lens.busy && lens.connected))
+            }) else { return menu; };
+            let copy_paths = paths.iter().map(|path| context_root.join(path).to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
+            menu = menu.item(PopupMenuItem::new(t("Copy full path")).on_click(
+                move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy_paths.clone())),
+            )).separator();
+            if !stage_paths.is_empty() {
                 let view = view.clone();
-                let path = context_path.clone();
                 let root = context_root.clone();
                 menu = menu.item(PopupMenuItem::new(t("Stage"))
                     .disabled(!enabled).on_click(move |_, _, cx| {
                         let _ = view.update(cx, |this, cx| {
                             if this.busy || !this.connected || this.root != root
-                                || !this.status.changes.iter().any(|c| c.path == path && !c.staged) {
+                                || !this.pending_paths_valid(&stage_paths, Some(false)) {
                                 return;
                             }
-                            this.command(vec!["stage".into(), "--".into(), path.clone()],
-                                "Stage", false, true, cx);
+                            let mut args = vec!["stage".into(), "--".into()];
+                            args.extend(stage_paths.iter().cloned());
+                            this.command(args, "Stage", false, true, cx);
                         });
                     }));
             }
-            let obliterate_view = view.clone();
-            let obliterate_path = context_path.clone();
-            let obliterate_root = context_root.clone();
-            menu = menu.item(PopupMenuItem::new(t("Obliterate…"))
-                .disabled(!enabled || backend::obliterate_args(&context_root, &context_path).is_err())
-                .on_click(move |_, window, cx| {
-                    let _ = obliterate_view.update(cx, |this, cx| {
-                        if this.root == obliterate_root { this.obliterate_dialog(obliterate_path.clone(), window, cx); }
-                    });
-                }));
             for unstage_only in [true, false] {
-                if (unstage_only && !staged) || (!unstage_only && !revert) { continue; }
+                if (unstage_only && unstage_paths.is_empty()) || (!unstage_only && !revert) { continue; }
                 let view = view.clone();
-                let path = context_path.clone();
+                let paths = if unstage_only { unstage_paths.clone() } else { paths.clone() };
                 let root = context_root.clone();
-                menu = menu.item(PopupMenuItem::new(t(if unstage_only { "Unstage…" } else { "Revert file…" }))
+                menu = menu.item(PopupMenuItem::new(t(if unstage_only { "Unstage…" } else if paths.len() > 1 { "Revert selected files" } else { "Revert file…" }))
                     .disabled(!enabled).on_click(move |_, window, cx| {
                         let _ = view.update(cx, |this, cx| {
-                            if this.root == root { this.revert_dialog(path.clone(), unstage_only, window, cx); }
+                            if this.root == root {
+                                this.revert_dialog(paths.clone(), unstage_only, window, cx);
+                            }
                         });
                     }));
             }
+            if !view.upgrade().is_some_and(|entity| entity.read(cx).obliterate_enabled) {
+                return menu;
+            }
+            let obliterate_view = view.clone();
+            let obliterate_root = context_root.clone();
+            menu = menu.item(PopupMenuItem::new(t("Obliterate…"))
+                .disabled(!enabled)
+                .on_click(move |_, window, cx| {
+                    let _ = obliterate_view.update(cx, |this, cx| {
+                        if this.root == obliterate_root { this.obliterate_files_dialog(paths.clone(), window, cx); }
+                    });
+                }));
             menu
         }))
     }
@@ -713,7 +760,7 @@ impl Lens {
             .gap_3()
             .border_b_1()
             .border_color(rgb(Divider))
-            .bg(rgb(if self.selection.current.as_deref() == Some(path) {
+            .bg(rgb(if self.selection.paths.contains(path) {
                 Selected
             } else {
                 PANEL

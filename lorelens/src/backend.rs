@@ -7,7 +7,7 @@ pub use cli::{find_cli, run_as};
 pub fn is_repository(root: &Path) -> bool {
     root.join(".lore").is_dir() || root.join(".urc").is_dir()
 }
-pub use filesystem::{delete_entry, list_directory, preview};
+pub use filesystem::{copy_entries, delete_entry, list_directory, preview};
 
 use serde_json::Value;
 use std::{

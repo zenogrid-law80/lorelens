@@ -67,7 +67,7 @@ impl Lens {
                                     "clone" => this.clone_dialog(window, cx),
                                     "create" => this.create_repository_dialog(window, cx),
                                     "stage" | "unstage" | "history" => {
-                                        this.file_command(action, cx)
+                                        this.file_command(action, window, cx)
                                     }
                                     "commit" => this.commit_staged(cx),
                                     "login" => this.login_dialog(window, cx),

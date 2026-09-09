@@ -108,9 +108,19 @@ impl Lens {
         mutation: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.busy {
-            return;
-        }
+        self.command_batch(vec![args], title, status, mutation, cx);
+    }
+
+    pub(super) fn command_batch(
+        &mut self,
+        commands: Vec<Vec<String>>,
+        title: &str,
+        status: bool,
+        mutation: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(args) = commands.first().cloned() else { return; };
+        if self.busy { return; }
         #[cfg(windows)]
         if cli_install::cli_missing(&self.cli) {
             self.cli_install_pending = true;
@@ -133,13 +143,17 @@ impl Lens {
         let login_remote = if login { args.get(1).cloned() } else { None };
         let branches = kind == CommandKind::ListBranches;
         let task = cx.background_executor().spawn(async move {
-            let result = backend::run_as(
-                &cli,
-                &root,
-                &args,
-                status || authentication || branches,
-                if login { None } else { identity.as_deref() },
-            );
+            let result = (|| {
+                let mut outputs = Vec::new();
+                for args in commands {
+                    match backend::run_as(&cli, &root, &args, status || authentication || branches,
+                        if login { None } else { identity.as_deref() }) {
+                        Ok(output) => outputs.push(output),
+                        Err(error) => return Err(format!("{}\n{}: {error}", outputs.join("\n"), args.join(" "))),
+                    }
+                }
+                Ok(outputs.join("\n"))
+            })();
             let identity_update = if authentication && backend::is_repository(&root) {
                 result
                     .as_ref()

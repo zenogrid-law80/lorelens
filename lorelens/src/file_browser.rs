@@ -1,6 +1,43 @@
 use super::*;
 
 impl Lens {
+    fn copy_dropped_paths(&mut self, paths: &ExternalPaths, destination: PathBuf, cx: &mut Context<Self>) {
+        if self.busy || paths.paths().is_empty() { return; }
+        self.busy = true;
+        self.preview.invalidate();
+        self.error = false;
+        self.notice = "Copying files…".into();
+        let root = self.root.clone();
+        let sources = paths.paths().to_vec();
+        let task = cx.background_executor().spawn(async move {
+            backend::copy_entries(&root, &destination, &sources)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.busy = false;
+                this.show_log = false;
+                match result {
+                    Ok(count) => {
+                        this.output_title = "Copy completed".into();
+                        this.output = format!("Copied {count} items.");
+                        this.selection.clear();
+                        this.refresh(cx);
+                    }
+                    Err(error) => {
+                        this.error = true;
+                        this.notice = "Copy failed — see details".into();
+                        this.output_title = "Copy failed".into();
+                        this.output = error.clone();
+                        this.log(error);
+                    }
+                }
+                cx.notify();
+            });
+        }).detach();
+        cx.notify();
+    }
+
     pub(super) fn render_file_browser(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let rgb = palette(cx);
         let ready = !self.busy;
@@ -149,6 +186,7 @@ impl Lens {
                 .to_string_lossy()
                 .into_owned();
             let path = entry.path.clone();
+            let drop_path = path.clone();
             let context_path = path.clone();
             let context_relative = relative.clone();
             let context_root = self.root.clone();
@@ -172,6 +210,13 @@ impl Lens {
                         }))
                         .cursor_pointer()
                         .hover(|s| s.bg(rgb(Hover)))
+                        .when(directory && ready, |row| {
+                            row.drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(rgb(Selected)))
+                                .on_drop(cx.listener(move |this, paths: &ExternalPaths, _, cx| {
+                                    cx.stop_propagation();
+                                    this.copy_dropped_paths(paths, drop_path.clone(), cx);
+                                }))
+                        })
                         .child(
                             div()
                                 .w(px(16.))
@@ -292,6 +337,24 @@ impl Lens {
                             }
                         }))
                         .context_menu(move |menu, _window, cx| {
+                            let menu = if directory {
+                                let folder_view = view.clone();
+                                let folder_path = context_relative.clone();
+                                let folder_root = context_root.clone();
+                                let enabled = view.upgrade().is_some_and(|entity| {
+                                    let lens = entity.read(cx);
+                                    !lens.busy && lens.connected && lens.root == folder_root
+                                        && lens.status.changes.iter().any(|c| std::path::Path::new(&c.path).starts_with(&folder_path))
+                                });
+                                menu.item(PopupMenuItem::new(t("Revert folder")).disabled(!enabled)
+                                    .on_click(move |_, window, cx| {
+                                        let _ = folder_view.update(cx, |this, cx| {
+                                            if this.root == folder_root {
+                                                this.folder_changes_dialog(vec![folder_path.clone()], "reset", window, cx);
+                                            }
+                                        });
+                                    })).separator()
+                            } else { menu };
                             let menu = if !directory
                                 && view.upgrade().is_some_and(|entity| {
                                     let lens = entity.read(cx);
@@ -364,7 +427,7 @@ impl Lens {
                                     };
                                     menu = menu.item(
                                         PopupMenuItem::new(t(label)).disabled(!enabled).on_click(
-                                            move |_, _, cx| {
+                                            move |_, window, cx| {
                                                 let _ = stage_view.update(cx, |this, cx| {
                                                     if this.busy
                                                         || !this.connected
@@ -375,6 +438,10 @@ impl Lens {
                                                                 && (!unstage || c.staged)
                                                         })
                                                     {
+                                                        return;
+                                                    }
+                                                    if directory {
+                                                        this.folder_changes_dialog(vec![stage_path.clone()], if unstage { "unstage" } else { "stage" }, window, cx);
                                                         return;
                                                     }
                                                     this.command(
@@ -448,22 +515,6 @@ impl Lens {
                             } else {
                                 menu
                             };
-                            let menu = if !directory {
-                                let action_view = view.clone();
-                                let path = context_relative.clone();
-                                let root = context_root.clone();
-                                let enabled = view.upgrade().is_some_and(|entity| {
-                                    let lens = entity.read(cx);
-                                    !lens.busy && lens.connected && lens.root == root
-                                        && backend::obliterate_args(&root, &path).is_ok()
-                                });
-                                menu.item(PopupMenuItem::new(t("Obliterate…")).disabled(!enabled)
-                                    .on_click(move |_, window, cx| {
-                                        let _ = action_view.update(cx, |this, cx| {
-                                            if this.root == root { this.obliterate_dialog(path.clone(), window, cx); }
-                                        });
-                                    })).separator()
-                            } else { menu };
                             let move_view = view.clone();
                             let delete_view = view.clone();
                             let delete_path = context_path.clone();
@@ -603,13 +654,30 @@ impl Lens {
                             } else {
                                 menu
                             };
-                            menu.item(PopupMenuItem::new(t("Delete…")).disabled(!delete_enabled).on_click(
+                            let menu = menu.item(PopupMenuItem::new(t("Delete…")).disabled(!delete_enabled).on_click(
                                 move |_, window, cx| {
                                     let _ = delete_view.update(cx, |this, cx| {
                                         if this.root == delete_root { this.delete_dialog(delete_path.clone(), window, cx); }
                                     });
                                 },
-                            ))
+                            ));
+                            if !directory && view.upgrade().is_some_and(|entity| entity.read(cx).obliterate_enabled) {
+                                let action_view = view.clone();
+                                let path = context_relative.clone();
+                                let root = context_root.clone();
+                                let enabled = view.upgrade().is_some_and(|entity| {
+                                    let lens = entity.read(cx);
+                                    !lens.busy && lens.connected && lens.root == root
+                                        && backend::obliterate_args(&root, &path).is_ok()
+                                });
+                                menu.item(PopupMenuItem::new(t("Obliterate…")).disabled(!enabled)
+                                    .on_click(move |_, window, cx| {
+                                        let _ = action_view.update(cx, |this, cx| {
+                                            if this.root == root { this.obliterate_dialog(path.clone(), window, cx); }
+                                        });
+                                    }))
+                            } else { menu }
+
                         }),
                 ),
             );
@@ -623,6 +691,14 @@ impl Lens {
             );
         }
         div()
+            .id("file-browser-drop-target")
+            .when(ready, |panel| {
+                panel.drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(rgb(Selected)))
+                    .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+                        cx.stop_propagation();
+                        this.copy_dropped_paths(paths, this.directory.clone(), cx);
+                    }))
+            })
             .w(px(320.))
             .flex_shrink_0()
             .flex()

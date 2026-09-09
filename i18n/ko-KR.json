@@ -1,4 +1,6 @@
 {
+  "Revert selected files": "선택한 파일 되돌리기",
+  "Restore all listed files to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.": "목록의 모든 파일을 현재 커밋된 리비전으로 복원할까요? 삭제된 파일은 복원되고 스테이징된 변경은 취소됩니다. 로컬 수정 내용은 사라지며 새로 추가한 파일은 삭제됩니다.",
   "Generate message": "메시지 생성",
   "Stage files before generating a commit message.": "커밋 메시지를 생성하려면 파일을 먼저 스테이징하세요.",
   "Generated commit message from staged changes.": "스테이징된 변경 사항으로 커밋 메시지를 생성했습니다.",
@@ -217,5 +219,13 @@
   "Type OBLITERATE to confirm permanent removal.": "영구 제거하려면 OBLITERATE를 입력하세요.",
   "Enter OBLITERATE to continue.": "계속하려면 OBLITERATE를 입력하세요.",
   "Select a single file inside the repository, outside metadata folders.": "저장소 내부에서 메타데이터 폴더를 제외한 단일 파일을 선택하세요.",
-  "Permanently remove the stored content of this file, delete its local copy, and stage its deletion. This cannot be undone and may affect the remote repository and revisions sharing this content. Other historical versions are not automatically removed.": "이 파일의 저장된 콘텐츠와 로컬 파일을 영구 제거하고 삭제를 스테이징합니다. 되돌릴 수 없으며 원격 저장소와 동일 콘텐츠를 참조하는 리비전에도 영향을 줄 수 있습니다. 다른 과거 버전까지 자동으로 제거하지는 않습니다."
+  "Permanently remove the stored content of this file, delete its local copy, and stage its deletion. This cannot be undone and may affect the remote repository and revisions sharing this content. Other historical versions are not automatically removed.": "이 파일의 저장된 콘텐츠와 로컬 파일을 영구 제거하고 삭제를 스테이징합니다. 되돌릴 수 없으며 원격 저장소와 동일 콘텐츠를 참조하는 리비전에도 영향을 줄 수 있습니다. 다른 과거 버전까지 자동으로 제거하지는 않습니다.",
+  "Working…": "작업 진행 중…",
+  "Revert folder": "폴더 되돌리기",
+  "Include all subfolders": "모든 하위 폴더 포함",
+  "Include all subfolders? Unchecked applies only to files directly inside the selected folders.": "모든 하위 폴더를 포함할까요? 체크를 해제하면 선택한 폴더 바로 아래 파일에만 적용합니다.",
+  "No matching changes in the selected scope.": "선택한 범위에 처리할 변경 사항이 없습니다.",
+  "Choose whether to apply this command to the selected folders only or include all subfolders.": "선택한 폴더만 처리할까요, 모든 하위 목록도 함께 처리할까요?",
+  "Selected folders only (direct files)": "선택한 폴더만 (바로 아래 파일)",
+  "Choose a folder scope before continuing.": "먼저 폴더 처리 범위를 선택해 주세요."
 }

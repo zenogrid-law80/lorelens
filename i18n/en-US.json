@@ -1,4 +1,6 @@
 {
+  "Revert selected files": "Revert selected files",
+  "Restore all listed files to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.": "Restore all listed files to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.",
   "Generate message": "Generate message",
   "Stage files before generating a commit message.": "Stage files before generating a commit message.",
   "Generated commit message from staged changes.": "Generated commit message from staged changes.",
@@ -217,5 +219,13 @@
   "Type OBLITERATE to confirm permanent removal.": "Type OBLITERATE to confirm permanent removal.",
   "Enter OBLITERATE to continue.": "Enter OBLITERATE to continue.",
   "Select a single file inside the repository, outside metadata folders.": "Select a single file inside the repository, outside metadata folders.",
-  "Permanently remove the stored content of this file, delete its local copy, and stage its deletion. This cannot be undone and may affect the remote repository and revisions sharing this content. Other historical versions are not automatically removed.": "Permanently remove the stored content of this file, delete its local copy, and stage its deletion. This cannot be undone and may affect the remote repository and revisions sharing this content. Other historical versions are not automatically removed."
+  "Permanently remove the stored content of this file, delete its local copy, and stage its deletion. This cannot be undone and may affect the remote repository and revisions sharing this content. Other historical versions are not automatically removed.": "Permanently remove the stored content of this file, delete its local copy, and stage its deletion. This cannot be undone and may affect the remote repository and revisions sharing this content. Other historical versions are not automatically removed.",
+  "Working…": "Working…",
+  "Revert folder": "Revert folder",
+  "Include all subfolders": "Include all subfolders",
+  "Include all subfolders? Unchecked applies only to files directly inside the selected folders.": "Include all subfolders? Unchecked applies only to files directly inside the selected folders.",
+  "No matching changes in the selected scope.": "No matching changes in the selected scope.",
+  "Choose whether to apply this command to the selected folders only or include all subfolders.": "Choose whether to apply this command to the selected folders only or include all subfolders.",
+  "Selected folders only (direct files)": "Selected folders only (direct files)",
+  "Choose a folder scope before continuing.": "Choose a folder scope before continuing."
 }

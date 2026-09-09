@@ -53,12 +53,41 @@ impl Render for Lens {
         }
         let mut pending = div()
             .id("pending-list")
+            .track_focus(&self.pending_focus)
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, _| {
+                window.focus(&this.pending_focus);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                let modifiers = event.keystroke.modifiers;
+                if event.keystroke.key == "a" && (modifiers.control || modifiers.platform)
+                    && !modifiers.alt && !modifiers.shift
+                {
+                    cx.stop_propagation();
+                    if this.busy { return; }
+                    let visible: Vec<_> = this.status.changes.iter().map(|c| c.path.clone()).collect();
+                    this.selection.select_all(&visible);
+                    this.preview.invalidate();
+                    this.notice = tf("{count} items selected", &[("count", this.selection.paths.len().to_string())]);
+                    cx.notify();
+                }
+            }))
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
             .bg(rgb(PANEL));
-        for (i, change) in self.status.changes.iter().enumerate().take(2000) {
-            pending = pending.child(self.change_row(i, change, cx));
+        if !self.status.changes.is_empty() {
+            pending = pending.child(
+                uniform_list("pending-rows", self.status.changes.len(),
+                    cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
+                        range.map(|i| this.change_row(i, &this.status.changes[i], cx)).collect::<Vec<_>>()
+                    }))
+                    .flex_1()
+                    .min_h_0()
+                    .pr(px(12.))
+                    .track_scroll(self.pending_scroll.clone()),
+            );
         }
         if self.status.changes.is_empty() {
             pending = pending.child(div().p_6().text_color(rgb(MUTED)).child(t(
@@ -186,6 +215,16 @@ impl Render for Lens {
             .child(tabs)
             .when(self.tab == Tab::Pending, |d| {
                 d.child(
+                    div().flex().items_center().px_4().py_2().bg(rgb(PANEL))
+                        .child(gpui_component::checkbox::Checkbox::new("enable-obliterate")
+                            .label(t("Obliterate"))
+                            .checked(self.obliterate_enabled)
+                            .disabled(self.busy)
+                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                this.obliterate_enabled = *checked;
+                                cx.notify();
+                            }))),
+                ).child(
                     div()
                         .flex()
                         .px_4()
@@ -200,7 +239,12 @@ impl Render for Lens {
                         .child(div().w(px(125.)).child(t("STATE")))
                         .child(div().w(px(75.)).text_right().child(t("SIZE"))),
                 )
-                .child(pending)
+                .child(
+                    div().relative().flex_1().min_h_0().flex().flex_col()
+                        .child(pending)
+                        .child(gpui_component::scroll::Scrollbar::vertical(&self.pending_scroll)
+                            .scrollbar_show(gpui_component::scroll::ScrollbarShow::Always)),
+                )
                 .child(
                     div()
                         .px_4()
@@ -243,6 +287,7 @@ impl Render for Lens {
             .child(detail_panel);
         div()
             .size_full()
+            .relative()
             .flex()
             .flex_col()
             .bg(rgb(BG))
@@ -352,5 +397,31 @@ impl Render for Lens {
                     .child("Rust + GPUI · LoreLens"),
             )
             .children(Root::render_dialog_layer(window, cx))
+            .when(self.busy, |view| {
+                view.child(
+                    div().absolute().inset_0().occlude()
+                        .flex().items_center().justify_center()
+                        .bg(gpui::rgba(0x00000080))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                        .child(
+                            div().w(px(420.)).max_w_full().p_6().rounded_lg()
+                                .bg(rgb(PANEL)).border_1().border_color(rgb(BORDER))
+                                .flex().flex_col().gap_4()
+                                .child(t("Working…"))
+                                .child(div().text_size(px(12.)).overflow_hidden().child(t(&self.notice)))
+                                .child(
+                                    div().relative().h(px(6.)).w_full().overflow_hidden()
+                                        .rounded_full().bg(rgb(BORDER))
+                                        .child(div().absolute().h_full().w(relative(0.3))
+                                            .rounded_full().bg(rgb(BLUE))
+                                            .with_animation("command-progress",
+                                                Animation::new(std::time::Duration::from_millis(1200)).repeat(),
+                                                |bar, delta| bar.left(relative(0.7 * (1. - (2. * delta - 1.).abs()))))),
+                                ),
+                        ),
+                )
+            })
     }
 }
