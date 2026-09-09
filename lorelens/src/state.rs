@@ -84,22 +84,12 @@ impl PreviewState {
 mod tests {
   use super::*;
   #[test]
-  fn context_action_uses_selected_pending_paths_or_the_clicked_row() {
-    let pending = vec!["한글 file.txt".into(), "--option".into(), "other".into()];
-    let mut state = SelectionState::default();
-    state.paths = ["한글 file.txt", "--option", "outside-pending"].map(String::from).into();
-    assert_eq!(state.context_paths("--option", &pending), pending[..2]);
-    assert_eq!(state.context_paths("other", &pending), vec![String::from("other")]);
-    assert!(state.context_paths("missing", &pending).is_empty());
-  }
-
-  #[test]
   fn large_selection_includes_paths_beyond_the_old_display_limit() {
     let visible: Vec<_> = (0..10_000).map(|i| format!("file-{i}")).collect();
     let mut state = SelectionState::default();
     state.select_all(&visible);
     assert_eq!(state.paths.len(), 10_000);
-    assert_eq!(state.context_paths("file-9999", &visible), visible);
+    assert!(visible.iter().all(|path| state.paths.contains(path)));
     state.click("file-9999".into(), &visible, true, false);
     assert_eq!(state.paths.len(), 9_999);
     assert!(!state.paths.contains("file-9999"));

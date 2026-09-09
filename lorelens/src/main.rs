@@ -179,10 +179,11 @@ impl Lens {
                 }
                 this.notice = tf("Saved {tool}: {path}", &[("tool", tool.to_string()), ("path", path.display().to_string())]);
                 this.error = false;
-                if let Some((root, file)) = retry {
-                  if this.root == root && this.settings.external_tool == tool {
-                    this.external_diff(file, cx);
-                  }
+                if let Some((root, file)) = retry
+                  && this.root == root
+                  && this.settings.external_tool == tool
+                {
+                  this.external_diff(file, cx);
                 }
               }
             }
@@ -398,15 +399,15 @@ impl Lens {
         match result {
           Ok(entries) => {
             this.entries = entries;
-            if let Some(folder) = this.folder_to_select.take() {
-              if let Some(index) = this.entries.iter().position(|entry| entry.path == folder) {
-                let relative = folder.strip_prefix(&this.root).unwrap_or(&folder).to_string_lossy().replace('\\', "/");
-                this.selection.current = Some(relative.clone());
-                this.selection.paths.clear();
-                this.selection.paths.insert(relative.clone());
-                this.selection.anchor = Some(relative);
-                this.files_scroll.scroll_to_item(index);
-              }
+            if let Some(folder) = this.folder_to_select.take()
+              && let Some(index) = this.entries.iter().position(|entry| entry.path == folder)
+            {
+              let relative = folder.strip_prefix(&this.root).unwrap_or(&folder).to_string_lossy().replace('\\', "/");
+              this.selection.current = Some(relative.clone());
+              this.selection.paths.clear();
+              this.selection.paths.insert(relative.clone());
+              this.selection.anchor = Some(relative);
+              this.files_scroll.scroll_to_item(index);
             }
             this.error = false;
             this.notice = tf("{count} entries · local filesystem", &[("count", this.entries.len().to_string())]);

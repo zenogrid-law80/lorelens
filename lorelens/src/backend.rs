@@ -311,10 +311,8 @@ pub fn clone_repository(cli: &Path, url: &str, destination: &Path, identity: Opt
     return Err("Repository URL and absolute destination path are required.".into());
   }
   let parent = destination.parent().filter(|parent| parent.is_dir()).ok_or("Destination parent folder must exist.")?;
-  if destination.exists() {
-    if !destination.is_dir() || fs::read_dir(destination).map_err(|e| e.to_string())?.next().is_some() {
-      return Err("Destination must be a new or empty folder.".into());
-    }
+  if destination.exists() && (!destination.is_dir() || fs::read_dir(destination).map_err(|e| e.to_string())?.next().is_some()) {
+    return Err("Destination must be a new or empty folder.".into());
   }
   let output = run_as(cli, parent, &["clone".into(), "--".into(), url.into(), destination.to_string_lossy().into_owned()], false, identity)?;
   if !is_repository(destination) {

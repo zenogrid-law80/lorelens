@@ -2,6 +2,7 @@ use gpui::{App, Hsla, Window};
 use gpui_component::{Theme, ThemeMode};
 
 #[derive(Clone, Copy)]
+#[allow(clippy::upper_case_acronyms)]
 pub(crate) enum ColorRole {
   BG,
   PANEL,

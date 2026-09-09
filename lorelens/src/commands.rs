@@ -75,7 +75,9 @@ mod tests {
 
 impl Lens {
   pub(super) fn refresh(&mut self, cx: &mut Context<Self>) {
-    if self.root.as_os_str().is_empty() { return; }
+    if self.root.as_os_str().is_empty() {
+      return;
+    }
     if self.busy {
       self.refresh_pending = true;
       return;
@@ -212,20 +214,20 @@ impl Lens {
               this.remote_branches.clear();
               let mut lines = Vec::new();
               for line in output.lines() {
-                if let Ok(event) = serde_json::from_str::<serde_json::Value>(line) {
-                  if event["tagName"] == "branchListEntry" {
-                    let data = &event["data"];
-                    if let Some(name) = data["name"].as_str() {
-                      let location = data["location"].as_str().unwrap_or("unknown");
-                      let archived = data["archived"].as_bool().unwrap_or(false);
-                      if location == "local" && !archived {
-                        this.local_branches.push(name.into());
-                      }
-                      if location == "remote" && !archived {
-                        this.remote_branches.push(name.into());
-                      }
-                      lines.push(format!("{} {} ({location})", if data["isCurrent"] == true { "*" } else { " " }, name));
+                if let Ok(event) = serde_json::from_str::<serde_json::Value>(line)
+                  && event["tagName"] == "branchListEntry"
+                {
+                  let data = &event["data"];
+                  if let Some(name) = data["name"].as_str() {
+                    let location = data["location"].as_str().unwrap_or("unknown");
+                    let archived = data["archived"].as_bool().unwrap_or(false);
+                    if location == "local" && !archived {
+                      this.local_branches.push(name.into());
                     }
+                    if location == "remote" && !archived {
+                      this.remote_branches.push(name.into());
+                    }
+                    lines.push(format!("{} {} ({location})", if data["isCurrent"] == true { "*" } else { " " }, name));
                   }
                 }
               }
@@ -280,10 +282,8 @@ impl Lens {
               this.notice = tf("{title} completed", &[("title", t(&title))]);
             }
             this.log(this.notice.clone());
-            if kind == CommandKind::Login {
-              if backend::is_repository(&this.root) {
-                this.refresh(cx);
-              }
+            if kind == CommandKind::Login && backend::is_repository(&this.root) {
+              this.refresh(cx);
             }
             if status && this.connected {
               this.command(vec!["branch".into(), "list".into()], "Branches", false, false, cx);

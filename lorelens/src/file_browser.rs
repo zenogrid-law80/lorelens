@@ -113,12 +113,12 @@ impl Lens {
             let path = this.root.join(selected);
             if path.is_dir() && ((key == "right" && !this.expanded_folders.contains(&path)) || (key == "left" && this.expanded_folders.contains(&path))) {
               this.toggle_tree_folder(path, cx);
-            } else if key == "left" {
-              if let Some(parent) = path.parent().filter(|p| *p != this.root) {
-                let relative = parent.strip_prefix(&this.root).unwrap_or(parent).to_string_lossy().replace('\\', "/");
-                this.selection.select(relative);
-                cx.notify();
-              }
+            } else if key == "left"
+              && let Some(parent) = path.parent().filter(|p| *p != this.root)
+            {
+              let relative = parent.strip_prefix(&this.root).unwrap_or(parent).to_string_lossy().replace('\\', "/");
+              this.selection.select(relative);
+              cx.notify();
             }
           }
           return;

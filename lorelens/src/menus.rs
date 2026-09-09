@@ -39,7 +39,7 @@ impl Lens {
         let label = t(label);
         let checked = kind == "View" && (theme == action || (action == "log" && show_log));
         menu = menu.item(
-          PopupMenuItem::new(if checked { format!("✓ {label}") } else { label.into() })
+          PopupMenuItem::new(if checked { format!("✓ {label}") } else { label })
             .disabled(!enabled)
             .on_click(move |_, window, cx| {
               let _ = view.update(cx, |this, cx| {
