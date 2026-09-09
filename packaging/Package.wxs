@@ -3,7 +3,7 @@
   <Package
     Name="LoreLens"
     Manufacturer="LoreLens"
-    Version="0.1.2.0"
+    Version="$(var.Version).0"
     UpgradeCode="6D7D0B1B-8C8D-4A28-9E9A-7B9B6D0D0E10"
     Scope="perMachine">
 
@@ -21,11 +21,6 @@
         <Component Id="ApplicationComponent" Guid="*">
           <File Id="LoreLensExe" Source="$(var.ExePath)" KeyPath="yes" />
         </Component>
-        <Directory Id="LoreCliFolder" Name="dist">
-          <Component Id="LoreCliComponent" Guid="*">
-            <File Id="LoreCliExe" Source="$(var.LoreCliPath)" Name="lore.exe" KeyPath="yes" />
-          </Component>
-        </Directory>
       </Directory>
     </StandardDirectory>
 
@@ -41,7 +36,6 @@
 
     <Feature Id="MainFeature" Title="LoreLens" Level="1">
       <ComponentRef Id="ApplicationComponent" />
-      <ComponentRef Id="LoreCliComponent" />
       <ComponentRef Id="StartMenuComponent" />
     </Feature>
   </Package>

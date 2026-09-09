@@ -7,7 +7,8 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Manifest = Join-Path $ProjectRoot 'lorelens\Cargo.toml'
 $ReleaseDir = Join-Path $ProjectRoot 'target\release'
 $ExePath = Join-Path $ReleaseDir 'lorelens.exe'
-$LoreCliPath = Join-Path $ProjectRoot 'lorelens\dist\lore.exe'
+$Version = [regex]::Match((Get-Content -LiteralPath $Manifest -Raw), '(?m)^version = "([0-9]+\.[0-9]+\.[0-9]+)"').Groups[1].Value
+if (-not $Version) { throw 'Package version was not found in Cargo.toml' }
 $OutputDir = Join-Path $ProjectRoot 'dist'
 $WixTool = Join-Path $ProjectRoot '.tools\wix.exe'
 
@@ -18,9 +19,6 @@ if (-not $SkipBuild) {
 if (-not (Test-Path $ExePath)) {
     throw "Release executable was not found: $ExePath"
 }
-if (-not (Test-Path -LiteralPath $LoreCliPath -PathType Leaf)) {
-    throw "Bundled Lore CLI was not found: $LoreCliPath"
-}
 
 if (-not (Test-Path $WixTool)) {
     New-Item -ItemType Directory -Force (Split-Path -Parent $WixTool) | Out-Null
@@ -29,8 +27,8 @@ if (-not (Test-Path $WixTool)) {
 
 New-Item -ItemType Directory -Force $OutputDir | Out-Null
 $WixSource = Join-Path $PSScriptRoot 'Package.wxs'
-$MsiPath = Join-Path $OutputDir 'LoreLens-0.1.2.msi'
-& $WixTool build $WixSource -d "ExePath=$ExePath" -d "LoreCliPath=$LoreCliPath" -o $MsiPath
+$MsiPath = Join-Path $OutputDir "LoreLens-$Version.msi"
+& $WixTool build $WixSource -arch x64 -d "ExePath=$ExePath" -d "Version=$Version" -o $MsiPath
 if ($LASTEXITCODE -ne 0) { throw "WiX failed with exit code $LASTEXITCODE" }
 
 Write-Host "Created $MsiPath"
