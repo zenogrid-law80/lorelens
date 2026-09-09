@@ -229,10 +229,6 @@ impl Lens {
                                     this.copy_dropped_paths(paths, drop_path.clone(), cx);
                                 }))
                         })
-                        .child(gpui_component::checkbox::Checkbox::new(("select-tree-file", i))
-                            .checked(self.selection.paths.contains(&relative))
-                            .disabled(self.busy)
-                            .tab_stop(false))
                         .child(
                             div().id(("tree-toggle", i)).on_click(cx.listener(move |this, _, _, cx| {
                                 if directory { cx.stop_propagation(); this.toggle_tree_folder(toggle_path.clone(), cx); }

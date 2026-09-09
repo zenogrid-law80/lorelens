@@ -40,7 +40,6 @@ pub struct Change {
     pub action: String,
     pub staged: bool,
     pub conflict: bool,
-    pub size: u64,
 }
 
 impl Change {
@@ -83,7 +82,6 @@ pub fn parse_status(output: &str) -> Result<Status, String> {
                     action: data["action"].as_str().unwrap_or("changed").into(),
                     staged: data["flagStaged"].as_bool().unwrap_or(false),
                     conflict: data["flagConflictUnresolved"].as_bool().unwrap_or(false),
-                    size: data["size"].as_u64().unwrap_or(0),
                 });
             }
             "complete" if data["status"].as_i64().unwrap_or(0) != 0 => return Err(data.to_string()),

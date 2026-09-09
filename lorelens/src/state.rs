@@ -8,14 +8,6 @@ pub(super) struct SelectionState {
 }
 
 impl SelectionState {
-    /// Context actions use the selection only when the clicked row belongs to it.
-    pub fn context_paths(&self, clicked: &str, visible: &[String]) -> Vec<String> {
-        if self.paths.contains(clicked) {
-            visible.iter().filter(|path| self.paths.contains(*path)).cloned().collect()
-        } else {
-            visible.iter().filter(|path| path.as_str() == clicked).cloned().collect()
-        }
-    }
 
     pub fn select_all(&mut self, visible: &[String]) {
         self.paths = visible.iter().cloned().collect();
