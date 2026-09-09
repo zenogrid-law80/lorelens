@@ -71,6 +71,7 @@ struct Lens {
     directory: PathBuf,
     cli: PathBuf,
     entries: Vec<Entry>,
+    expanded_folders: std::collections::HashSet<PathBuf>,
     status: Status,
     locked_paths: std::collections::HashSet<String>,
     connected: bool,
@@ -83,6 +84,8 @@ struct Lens {
     logs: Vec<String>,
     message: Entity<TextInput>,
     filter: Entity<TextInput>,
+    pending_filter: Entity<TextInput>,
+    pending_visible: Vec<usize>,
     notice: String,
     error: bool,
     show_log: bool,
@@ -278,6 +281,8 @@ impl Lens {
         let connect_after_load = backend::is_repository(&root);
         let filter = cx.new(|cx| TextInput::new("Filter files…", cx));
         cx.observe(&filter, |_, _, cx| cx.notify()).detach();
+        let pending_filter = cx.new(|cx| TextInput::new("Filter changes…", cx));
+        cx.observe(&pending_filter, |_, _, cx| cx.notify()).detach();
         let mut view = Self {
             files_focus: cx.focus_handle(),
             pending_focus: cx.focus_handle(),
@@ -287,10 +292,11 @@ impl Lens {
             directory: root.clone(), root, cli: settings.cli.clone().filter(|path| path.is_file()).unwrap_or_else(backend::find_cli), entries: vec![],
             status: Status::default(), connected: false, busy: false, tab: Tab::Pending,
             locked_paths: Default::default(),
+            expanded_folders: Default::default(),
             selection: SelectionState::default(), preview: PreviewState::default(), output: "Open a folder to browse local files.\n\nFor version control, open a Lore repository and locate the Lore CLI.\nUse Sync to synchronize the current repository. Commits are not pushed automatically.".into(),
             output_title: "Welcome to LoreLens".into(), logs: vec![],
             message: cx.new(|cx| TextInput::new("Describe your staged changes…", cx)),
-            filter, notice: "Opening repository…".into(), error: false, show_log: false, obliterate_enabled: false,
+            filter, pending_filter, pending_visible: Vec::new(), notice: "Opening repository…".into(), error: false, show_log: false, obliterate_enabled: false,
             settings, settings_error, branch_output: String::new(), show_branches: false,
             connect_after_load,
             startup_login_pending: false,
@@ -353,6 +359,7 @@ impl Lens {
         self.selection.paths.clear();
         self.selection.anchor = None;
         self.entries.clear();
+        self.expanded_folders.clear();
         self.branch_output.clear();
         self.local_branches.clear();
         self.remote_branches.clear();
@@ -418,10 +425,10 @@ impl Lens {
         self.preview.invalidate();
         self.busy = true;
         let root = self.root.clone();
-        let directory = self.directory.clone();
+        let expanded = self.expanded_folders.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { backend::list_directory(&root, &directory) });
+            .spawn(async move { backend::list_tree(&root, &expanded) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -647,7 +654,7 @@ impl Lens {
             } else {
                 "Unstaged"
             },
-            change.size,
+            &change.node_type,
             cx,
         )
         .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
@@ -659,7 +666,8 @@ impl Lens {
                 this.select(path.clone(), cx);
                 return;
             }
-            let visible: Vec<_> = this.status.changes.iter().map(|c| c.path.clone()).collect();
+            let visible: Vec<_> = this.pending_visible.iter()
+                .map(|index| this.status.changes[*index].path.clone()).collect();
             // Selection shared with the file browser must stay within this list.
             let visible_set: std::collections::HashSet<_> = visible.iter().collect();
             this.selection.paths.retain(|p| visible_set.contains(p));
@@ -682,7 +690,7 @@ impl Lens {
                         else { change.path == context_path }) { continue; }
                     paths.push(change.path.clone());
                     if change.staged { unstage_paths.push(change.path.clone()); }
-                    else { stage_paths.push(change.path.clone()); }
+                    else if !change.conflict { stage_paths.push(change.path.clone()); }
                     revert |= change.staged || change.file_marker() == "M"
                         || matches!(change.action.as_str(), "modify" | "remove" | "delete");
                 }
@@ -691,10 +699,7 @@ impl Lens {
                     || matches!(lens.root.join(&paths[0]).try_exists(), Ok(false));
                 Some((paths, stage_paths, unstage_paths, revert, !lens.busy && lens.connected))
             }) else { return menu; };
-            let copy_paths = paths.iter().map(|path| context_root.join(path).to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
-            menu = menu.item(PopupMenuItem::new(t("Copy full path")).on_click(
-                move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy_paths.clone())),
-            )).separator();
+            if !enabled { return menu; }
             if !stage_paths.is_empty() {
                 let view = view.clone();
                 let root = context_root.clone();
@@ -725,7 +730,19 @@ impl Lens {
                         });
                     }));
             }
-            if !view.upgrade().is_some_and(|entity| entity.read(cx).obliterate_enabled) {
+            // Obliterate resolves the current/staged node. Untracked additions and
+            // staged deletions have no eligible node to remove.
+            let obliterate_paths = view.upgrade().map(|entity| {
+                let lens = entity.read(cx);
+                if !lens.obliterate_enabled { return Vec::new(); }
+                lens.status.changes.iter().filter(|change| {
+                    paths.contains(&change.path) && !change.conflict
+                        && !(!change.staged && matches!(change.action.as_str(), "add" | "create"))
+                        && !(change.staged && matches!(change.action.as_str(), "remove" | "delete"))
+                        && backend::obliterate_args(&lens.root, &change.path).is_ok()
+                }).map(|change| change.path.clone()).collect::<Vec<_>>()
+            }).unwrap_or_default();
+            if obliterate_paths.is_empty() {
                 return menu;
             }
             let obliterate_view = view.clone();
@@ -734,7 +751,7 @@ impl Lens {
                 .disabled(!enabled)
                 .on_click(move |_, window, cx| {
                     let _ = obliterate_view.update(cx, |this, cx| {
-                        if this.root == obliterate_root { this.obliterate_files_dialog(paths.clone(), window, cx); }
+                        if this.root == obliterate_root { this.obliterate_files_dialog(obliterate_paths.clone(), window, cx); }
                     });
                 }));
             menu
@@ -747,17 +764,30 @@ impl Lens {
         path: &str,
         action: &str,
         state: &str,
-        size: u64,
+        node_type: &str,
         cx: &App,
     ) -> Stateful<Div> {
         let rgb = palette(cx);
+        let kind = match node_type.to_ascii_lowercase().as_str() {
+            "directory" | "folder" => "Folder",
+            "file" => "File",
+            "link" => "Link",
+            _ => {
+                match std::fs::symlink_metadata(self.root.join(path)) {
+                    Ok(meta) if meta.file_type().is_symlink() => "Link",
+                    Ok(meta) if meta.is_dir() => "Folder",
+                    Ok(meta) if meta.is_file() => "File",
+                    _ => "Unknown type",
+                }
+            }
+        };
         div()
             .id(("file-row", index))
             .flex()
             .items_center()
-            .h(px(34.))
-            .px_4()
-            .gap_3()
+            .h(px(29.))
+            .px_3()
+            .gap_2()
             .border_b_1()
             .border_color(rgb(Divider))
             .bg(rgb(if self.selection.paths.contains(path) {
@@ -767,12 +797,17 @@ impl Lens {
             }))
             .cursor_pointer()
             .hover(|s| s.bg(rgb(Hover)))
-            .child(
-                div()
-                    .w(px(18.))
-                    .text_color(rgb(BLUE))
-                    .child(if state == "Folder" { "▸" } else { "·" }),
-            )
+            .child(gpui_component::checkbox::Checkbox::new(("select-change", index))
+                .checked(self.selection.paths.contains(path))
+                .disabled(self.busy)
+                .tab_stop(false))
+            .child(div().w(px(16.)).flex_shrink_0()
+                .text_color(rgb(if kind == "Folder" { Warning } else { MUTED }))
+                .child(gpui_component::Icon::new(match kind {
+                    "Folder" => gpui_component::IconName::Folder,
+                    "Link" => gpui_component::IconName::ExternalLink,
+                    _ => gpui_component::IconName::File,
+                }).size(px(16.))))
             .child(
                 div()
                     .flex_1()
@@ -781,26 +816,14 @@ impl Lens {
                     .text_ellipsis()
                     .child(path.to_string()),
             )
-            .child(div().w(px(90.)).text_color(rgb(MUTED)).child(t(action)))
-            .child(
-                div()
-                    .w(px(125.))
-                    .text_color(rgb(if state == "Staged" {
-                        Success
-                    } else if state == "Conflict" {
-                        Danger
-                    } else {
-                        MUTED
-                    }))
-                    .child(t(state)),
-            )
-            .child(div().w(px(75.)).text_right().text_color(rgb(MUTED)).child(
-                if state == "Folder" {
-                    "—".into()
-                } else {
-                    format_size(size)
-                },
-            ))
+            .child(div().w(px(90.)).flex_shrink_0().text_size(px(11.))
+                .text_color(rgb(if matches!(action, "remove" | "delete") { Danger }
+                    else if matches!(action, "add" | "create") { Success } else { MUTED }))
+                .child(t(action)))
+            .child(div().w(px(110.)).flex_shrink_0().text_size(px(11.))
+                .text_color(rgb(if state == "Conflict" { Danger }
+                    else if state == "Staged" { Success } else { MUTED }))
+                .child(t(state)))
     }
 }
 

@@ -1,6 +1,12 @@
 use super::*;
 
 impl Lens {
+    fn toggle_tree_folder(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if self.busy { return; }
+        if !self.expanded_folders.remove(&path) { self.expanded_folders.insert(path.clone()); }
+        self.directory = path;
+        self.load_directory(cx);
+    }
     fn copy_dropped_paths(&mut self, paths: &ExternalPaths, destination: PathBuf, cx: &mut Context<Self>) {
         if self.busy || paths.paths().is_empty() { return; }
         self.busy = true;
@@ -56,6 +62,24 @@ impl Lens {
             .track_scroll(&self.files_scroll)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                 let key = event.keystroke.key.as_str();
+                let modifiers = event.keystroke.modifiers;
+                if key == "a" && (modifiers.control || modifiers.platform)
+                    && !modifiers.alt && !modifiers.shift
+                {
+                    cx.stop_propagation();
+                    if this.busy { return; }
+                    let query = this.filter.read(cx).content.to_lowercase();
+                    let visible: Vec<_> = this.entries.iter().filter(|entry| {
+                        entry.path.file_name().unwrap_or_default().to_string_lossy()
+                            .to_lowercase().contains(&query)
+                    }).take(2000).map(|entry| entry.path.strip_prefix(&this.root)
+                        .unwrap_or(&entry.path).to_string_lossy().replace('\\', "/")).collect();
+                    this.selection.select_all(&visible);
+                    this.preview.invalidate();
+                    this.notice = tf("{count} items selected", &[("count", visible.len().to_string())]);
+                    cx.notify();
+                    return;
+                }
                 if key == "enter" {
                     cx.stop_propagation();
                     if !this.busy {
@@ -71,33 +95,18 @@ impl Lens {
                     return;
                 }
                 if key == "left" || key == "right" {
-                    let target = if key == "left" {
-                        if this.directory == this.root {
-                            return;
+                    if let Some(selected) = this.selection.current.clone() {
+                        let path = this.root.join(selected);
+                        if path.is_dir() && ((key == "right" && !this.expanded_folders.contains(&path))
+                            || (key == "left" && this.expanded_folders.contains(&path))) {
+                            this.toggle_tree_folder(path, cx);
+                        } else if key == "left" {
+                            if let Some(parent) = path.parent().filter(|p| *p != this.root) {
+                                let relative = parent.strip_prefix(&this.root).unwrap_or(parent).to_string_lossy().replace('\\', "/");
+                                this.selection.select(relative);
+                                cx.notify();
+                            }
                         }
-                        this.directory
-                            .parent()
-                            .filter(|parent| parent.starts_with(&this.root))
-                            .map(|parent| parent.to_path_buf())
-                    } else {
-                        this.selection.current.as_ref().and_then(|selected| {
-                            let path = this.root.join(selected);
-                            this.entries
-                                .iter()
-                                .find(|entry| entry.directory && entry.path == path)
-                                .map(|entry| entry.path.clone())
-                        })
-                    };
-                    if let Some(target) = target {
-                        this.folder_to_select = (key == "left").then(|| this.directory.clone());
-                        this.directory = target;
-                        this.selection.clear();
-                        this.filter.update(cx, |input, cx| {
-                            input.reset();
-                            cx.notify();
-                        });
-                        this.files_scroll.set_offset(point(px(0.), px(0.)));
-                        this.load_directory(cx);
                     }
                     return;
                 }
@@ -192,6 +201,8 @@ impl Lens {
             let context_root = self.root.clone();
             let view = cx.entity().downgrade();
             let directory = entry.directory;
+            let depth = entry.path.strip_prefix(&self.root).unwrap_or(&entry.path).components().count().saturating_sub(1);
+            let toggle_path = path.clone();
             let change = self.status.changes.iter().find(|c| c.path == relative);
             let marker = change.map_or("", Change::file_marker);
             files = files.child(
@@ -200,6 +211,7 @@ impl Lens {
                         .id(("tree-file", i))
                         .h(px(30.))
                         .px_3()
+                        .pl(px(12. + depth as f32 * 16.))
                         .flex()
                         .gap_2()
                         .items_center()
@@ -217,11 +229,17 @@ impl Lens {
                                     this.copy_dropped_paths(paths, drop_path.clone(), cx);
                                 }))
                         })
+                        .child(gpui_component::checkbox::Checkbox::new(("select-tree-file", i))
+                            .checked(self.selection.paths.contains(&relative))
+                            .disabled(self.busy)
+                            .tab_stop(false))
                         .child(
-                            div()
-                                .w(px(16.))
+                            div().id(("tree-toggle", i)).on_click(cx.listener(move |this, _, _, cx| {
+                                if directory { cx.stop_propagation(); this.toggle_tree_folder(toggle_path.clone(), cx); }
+                            }))
+                                .w(px(14.))
                                 .text_color(rgb(if directory { Warning } else { MUTED }))
-                                .child(if directory { "▸" } else { "·" }),
+                                .child(if directory { if self.expanded_folders.contains(&path) { "▾" } else { "▸" } } else { "·" }),
                         )
                         .child(
                             div()
@@ -267,9 +285,7 @@ impl Lens {
                                 && !additive
                                 && !modifiers.shift
                             {
-                                this.selection.clear();
-                                this.directory = path.clone();
-                                this.load_directory(cx);
+                                this.toggle_tree_folder(path.clone(), cx);
                             } else if !directory && !additive && !modifiers.shift {
                                 this.select(relative.clone(), cx);
                             } else {
@@ -337,6 +353,137 @@ impl Lens {
                             }
                         }))
                         .context_menu(move |menu, _window, cx| {
+                            let selected_paths = view.upgrade().map(|entity| {
+                                let lens = entity.read(cx);
+                                let selected = lens.selection.paths.contains(&context_relative);
+                                if !selected { return vec![context_relative.clone()]; }
+                                lens.entries.iter().filter_map(|entry| {
+                                    let relative = entry.path.strip_prefix(&lens.root).unwrap_or(&entry.path)
+                                        .to_string_lossy().replace('\\', "/");
+                                    lens.selection.paths.contains(&relative).then_some(relative)
+                                }).collect::<Vec<_>>()
+                            }).unwrap_or_else(|| vec![context_relative.clone()]);
+                            // A multi-selection must never fall through to clicked-item actions.
+                            if selected_paths.len() > 1 {
+                                let Some(entity) = view.upgrade() else { return menu; };
+                                let lens = entity.read(cx);
+                                if lens.root != context_root { return menu; }
+                                let ready = !lens.busy;
+                                let vcs = ready && lens.connected;
+                                let has_folders = selected_paths.iter().any(|p| lens.root.join(p).is_dir());
+                                let changes: Vec<_> = lens.status.changes.iter().filter(|c| selected_paths.iter().any(|p| {
+                                    c.path == *p || (lens.root.join(p).is_dir() && std::path::Path::new(&c.path).starts_with(p))
+                                })).cloned().collect();
+                                let mut menu = menu;
+                                for (action, label) in [("stage", "Stage selected"), ("unstage", "Unstage selected"), ("reset", "Revert selected files")] {
+                                    let paths: Vec<_> = changes.iter().filter(|c| match action {
+                                        "stage" => !c.staged, "unstage" => c.staged, _ => true,
+                                    }).map(|c| c.path.clone()).collect();
+                                    let enabled = vcs && !paths.is_empty();
+                                    let targets = selected_paths.clone();
+                                    let root = context_root.clone();
+                                    let action_view = view.clone();
+                                    menu = menu.item(PopupMenuItem::new(t(label)).disabled(!enabled)
+                                        .on_click(move |_, window, cx| {
+                                            let _ = action_view.update(cx, |this, cx| {
+                                                if this.busy || !this.connected || this.root != root { return; }
+                                                if has_folders {
+                                                    this.folder_changes_dialog(targets.clone(), action, window, cx);
+                                                } else if action == "stage" {
+                                                    if !this.pending_paths_valid(&paths, Some(false)) { return; }
+                                                    let mut args = vec!["stage".into(), "--".into()];
+                                                    args.extend(paths.clone());
+                                                    this.command(args, label, false, true, cx);
+                                                } else {
+                                                    this.revert_dialog(paths.clone(), action == "unstage", window, cx);
+                                                }
+                                            });
+                                        }));
+                                }
+                                let sources: Vec<_> = selected_paths.iter().map(|p| context_root.join(p)).collect();
+                                let copy = sources.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n");
+                                let delete_view = view.clone();
+                                let root = context_root.clone();
+                                menu = menu.separator()
+                                    .item(PopupMenuItem::new(t("Copy selected full paths")).on_click(move |_, _, cx| {
+                                        cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
+                                    }))
+                                    .item(PopupMenuItem::new(t("Delete…")).disabled(!ready).on_click(move |_, window, cx| {
+                                        let _ = delete_view.update(cx, |this, cx| {
+                                            if this.root == root { this.delete_files_dialog(sources.clone(), window, cx); }
+                                        });
+                                    }));
+                                if lens.obliterate_enabled && !has_folders {
+                                    let root = context_root.clone();
+                                    let action_view = view.clone();
+                                    menu = menu.item(PopupMenuItem::new(t("Obliterate…")).disabled(!vcs)
+                                        .on_click(move |_, window, cx| {
+                                            let _ = action_view.update(cx, |this, cx| {
+                                                if this.root == root { this.obliterate_files_dialog(selected_paths.clone(), window, cx); }
+                                            });
+                                        }));
+                                }
+                                return menu;
+                            }
+                            let selected_changes = view.upgrade().map(|entity| {
+                                let lens = entity.read(cx);
+                                lens.status.changes.iter().filter(|change| selected_paths.iter().any(|path| {
+                                    change.path == *path || std::path::Path::new(&change.path).starts_with(path)
+                                })).map(|change| change.path.clone()).collect::<Vec<_>>()
+                            }).unwrap_or_default();
+                            let selected_staged: Vec<_> = view.upgrade().map(|entity| {
+                                let lens = entity.read(cx);
+                                lens.status.changes.iter().filter(|change| change.staged
+                                    && selected_changes.contains(&change.path))
+                                    .map(|change| change.path.clone()).collect()
+                            }).unwrap_or_default();
+                            let selected_unstaged: Vec<_> = view.upgrade().map(|entity| {
+                                let lens = entity.read(cx);
+                                lens.status.changes.iter().filter(|change| !change.staged
+                                    && selected_changes.contains(&change.path))
+                                    .map(|change| change.path.clone()).collect()
+                            }).unwrap_or_default();
+                            let bulk_enabled = view.upgrade().is_some_and(|entity| {
+                                let lens = entity.read(cx);
+                                !lens.busy && lens.connected && lens.root == context_root
+                            });
+                            let mut menu = menu;
+                            if selected_paths.len() > 1 {
+                                let copy_paths = selected_paths.iter().map(|path| context_root.join(path)
+                                    .to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
+                                menu = menu.item(PopupMenuItem::new(t("Copy selected full paths")).on_click(
+                                    move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy_paths.clone())),
+                                ));
+                            }
+                            if !selected_unstaged.is_empty() {
+                                let action_view = view.clone();
+                                let root = context_root.clone();
+                                menu = menu.item(PopupMenuItem::new(t("Stage selected"))
+                                    .disabled(!bulk_enabled).on_click(move |_, _, cx| {
+                                        let _ = action_view.update(cx, |this, cx| {
+                                            if this.root != root || !this.pending_paths_valid(&selected_unstaged, Some(false)) { return; }
+                                            let mut args = vec!["stage".into(), "--".into()];
+                                            args.extend(selected_unstaged.clone());
+                                            this.command(args, "Stage selected", false, true, cx);
+                                        });
+                                    }));
+                            }
+                            if !selected_staged.is_empty() {
+                                let action_view = view.clone();
+                                let root = context_root.clone();
+                                menu = menu.item(PopupMenuItem::new(t("Unstage selected"))
+                                    .disabled(!bulk_enabled).on_click(move |_, _, cx| {
+                                        let _ = action_view.update(cx, |this, cx| {
+                                            if this.root != root || !this.pending_paths_valid(&selected_staged, Some(true)) { return; }
+                                            let mut args = vec!["unstage".into(), "--".into()];
+                                            args.extend(selected_staged.clone());
+                                            this.command(args, "Unstage selected", false, true, cx);
+                                        });
+                                    }));
+                            }
+                            if selected_paths.len() > 1 || !selected_changes.is_empty() {
+                                menu = menu.separator();
+                            }
                             let menu = if directory {
                                 let folder_view = view.clone();
                                 let folder_path = context_relative.clone();

@@ -2,6 +2,20 @@ mod cli;
 mod filesystem;
 mod ignore;
 mod obliterate;
+pub fn list_tree(root: &Path, expanded: &std::collections::HashSet<PathBuf>) -> Result<Vec<Entry>, String> {
+    fn walk(root: &Path, dir: &Path, expanded: &std::collections::HashSet<PathBuf>, result: &mut Vec<Entry>) -> Result<(), String> {
+        for entry in list_directory(root, dir)? {
+            let descend = entry.directory && expanded.contains(&entry.path);
+            let path = entry.path.clone();
+            result.push(entry);
+            if descend { walk(root, &path, expanded, result)?; }
+        }
+        Ok(())
+    }
+    let mut result = Vec::new();
+    walk(root, root, expanded, &mut result)?;
+    Ok(result)
+}
 pub use obliterate::obliterate_args;
 pub use cli::{find_cli, run_as};
 pub fn is_repository(root: &Path) -> bool {
@@ -22,6 +36,7 @@ use std::{
 #[derive(Clone, Debug, Default)]
 pub struct Change {
     pub path: String,
+    pub node_type: String,
     pub action: String,
     pub staged: bool,
     pub conflict: bool,
@@ -64,6 +79,7 @@ pub fn parse_status(output: &str) -> Result<Status, String> {
                 let path = data["path"].as_str().ok_or("Status file has no path")?;
                 status.changes.push(Change {
                     path: path.into(),
+                    node_type: data["type"].as_str().unwrap_or("").to_owned(),
                     action: data["action"].as_str().unwrap_or("changed").into(),
                     staged: data["flagStaged"].as_bool().unwrap_or(false),
                     conflict: data["flagConflictUnresolved"].as_bool().unwrap_or(false),

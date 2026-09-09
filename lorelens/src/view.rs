@@ -16,8 +16,8 @@ impl Render for Lens {
             .border_b_1()
             .border_color(rgb(BORDER));
         for (id, label, tab) in [
-            ("pending-tab", "Pending changes", Tab::Pending),
-            ("history-tab", "Submitted revisions", Tab::History),
+            ("pending-tab", "Changes", Tab::Pending),
+            ("history-tab", "History", Tab::History),
             ("preview-tab", "File preview", Tab::Files),
         ] {
             tabs = tabs.child(
@@ -51,6 +51,18 @@ impl Render for Lens {
                     })),
             );
         }
+        let pending_query = self.pending_filter.read(cx).content.to_lowercase().to_string();
+        self.pending_visible = self.status.changes.iter().enumerate()
+            .filter(|(_, change)| pending_query.is_empty()
+                || change.path.to_lowercase().contains(&pending_query)
+                || change.action.to_lowercase().contains(&pending_query))
+            .map(|(index, _)| index)
+            .collect();
+        let visible_paths: Vec<_> = self.pending_visible.iter()
+            .map(|index| self.status.changes[*index].path.clone()).collect();
+        let all_visible_selected = !visible_paths.is_empty()
+            && visible_paths.iter().all(|path| self.selection.paths.contains(path));
+        let visible_count = visible_paths.len();
         let mut pending = div()
             .id("pending-list")
             .track_focus(&self.pending_focus)
@@ -64,7 +76,8 @@ impl Render for Lens {
                 {
                     cx.stop_propagation();
                     if this.busy { return; }
-                    let visible: Vec<_> = this.status.changes.iter().map(|c| c.path.clone()).collect();
+                    let visible: Vec<_> = this.pending_visible.iter()
+                        .map(|index| this.status.changes[*index].path.clone()).collect();
                     this.selection.select_all(&visible);
                     this.preview.invalidate();
                     this.notice = tf("{count} items selected", &[("count", this.selection.paths.len().to_string())]);
@@ -77,11 +90,14 @@ impl Render for Lens {
             .flex_col()
             .overflow_hidden()
             .bg(rgb(PANEL));
-        if !self.status.changes.is_empty() {
+        if !self.pending_visible.is_empty() {
             pending = pending.child(
-                uniform_list("pending-rows", self.status.changes.len(),
+                uniform_list("pending-rows", self.pending_visible.len(),
                     cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
-                        range.map(|i| this.change_row(i, &this.status.changes[i], cx)).collect::<Vec<_>>()
+                        range.map(|i| {
+                            let change_index = this.pending_visible[i];
+                            this.change_row(change_index, &this.status.changes[change_index], cx)
+                        }).collect::<Vec<_>>()
                     }))
                     .flex_1()
                     .min_h_0()
@@ -89,9 +105,11 @@ impl Render for Lens {
                     .track_scroll(self.pending_scroll.clone()),
             );
         }
-        if self.status.changes.is_empty() {
+        if self.pending_visible.is_empty() {
             pending = pending.child(div().p_6().text_color(rgb(MUTED)).child(t(
-                if self.connected {
+                if self.connected && !self.status.changes.is_empty() {
+                    "No matching changes."
+                } else if self.connected {
                     "No pending changes. Refresh to scan for edits."
                 } else {
                     "Open a Lore repository and Refresh to view pending changes."
@@ -215,32 +233,45 @@ impl Render for Lens {
             .child(tabs)
             .when(self.tab == Tab::Pending, |d| {
                 d.child(
-                    div().flex().items_center().px_4().py_2().bg(rgb(PANEL))
-                        .child(gpui_component::checkbox::Checkbox::new("enable-obliterate")
-                            .label(t("Obliterate"))
-                            .checked(self.obliterate_enabled)
-                            .disabled(self.busy)
-                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                this.obliterate_enabled = *checked;
-                                cx.notify();
-                            }))),
-                ).child(
-                    div()
-                        .flex()
-                        .px_4()
-                        .py_2()
-                        .gap_3()
-                        .bg(rgb(Hover))
-                        .text_size(px(11.))
-                        .text_color(rgb(MUTED))
-                        .child(div().w(px(18.)))
-                        .child(div().flex_1().child(t("FILE / PATH")))
-                        .child(div().w(px(90.)).child(t("ACTION")))
-                        .child(div().w(px(125.)).child(t("STATE")))
-                        .child(div().w(px(75.)).text_right().child(t("SIZE"))),
+                    div().px_3().py_2().flex().flex_col().gap_2().bg(rgb(PANEL))
+                        .child(div().overflow_hidden().border_1().border_color(rgb(BORDER))
+                            .rounded_md().child(self.pending_filter.clone()))
+                        .child(div().flex().items_center().gap_2().text_size(px(12.))
+                            .child(gpui_component::checkbox::Checkbox::new("select-visible-changes")
+                                .label(tf("{count} changed files", &[("count", visible_count.to_string())]))
+                                .checked(all_visible_selected)
+                                .disabled(self.busy || visible_paths.is_empty())
+                                .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                                    if this.busy { return; }
+                                    if *checked { this.selection.select_all(&visible_paths); }
+                                    else {
+                                        for path in &visible_paths { this.selection.paths.remove(path); }
+                                        this.selection.current = this.selection.paths.iter().next().cloned();
+                                        this.selection.anchor = this.selection.current.clone();
+                                    }
+                                    this.preview.invalidate();
+                                    cx.notify();
+                                })))
+                            .child(div().flex_1())
+                            .child(gpui_component::checkbox::Checkbox::new("enable-obliterate")
+                                .label(t("Obliterate"))
+                                .checked(self.obliterate_enabled)
+                                .disabled(self.busy)
+                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                    this.obliterate_enabled = *checked;
+                                    cx.notify();
+                                })))),
                 )
                 .child(
                     div().relative().flex_1().min_h_0().flex().flex_col()
+                        .child(div().flex().items_center().flex_shrink_0().h(px(29.))
+                            .pl_3().pr(px(24.)).gap_2().bg(rgb(Hover))
+                            .text_size(px(11.)).text_color(rgb(MUTED))
+                            .child(div().w(px(16.)).flex_shrink_0())
+                            .child(div().w(px(16.)).flex_shrink_0())
+                            .child(div().flex_1().min_w_0().child(t("FILE / PATH")))
+                            .child(div().w(px(90.)).flex_shrink_0().child(t("ACTION")))
+                            .child(div().w(px(110.)).flex_shrink_0().child(t("STATE"))))
                         .child(pending)
                         .child(gpui_component::scroll::Scrollbar::vertical(&self.pending_scroll)
                             .scrollbar_show(gpui_component::scroll::ScrollbarShow::Always)),

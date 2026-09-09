@@ -1,4 +1,7 @@
 {
+  "File": "文件",
+  "Link": "链接",
+  "Unknown type": "类型未知",
   "Revert selected files": "还原所选文件",
   "Restore all listed files to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.": "将列表中的所有文件恢复到当前已提交的修订版本？已删除的文件将被恢复，暂存的更改将被丢弃。本地修改将丢失，新添加的文件将被删除。",
   "Generate message": "生成消息",
@@ -227,5 +230,10 @@
   "No matching changes in the selected scope.": "所选范围内没有可处理的更改。",
   "Choose whether to apply this command to the selected folders only or include all subfolders.": "仅处理所选文件夹，还是同时处理所有子文件夹？",
   "Selected folders only (direct files)": "仅所选文件夹（直属文件）",
-  "Choose a folder scope before continuing.": "请先选择文件夹处理范围。"
+  "Choose a folder scope before continuing.": "请先选择文件夹处理范围。",
+  "{count} changed files": "{count} 个更改文件",
+  "No matching changes.": "没有匹配的更改。",
+  "Copy selected full paths": "复制所选完整路径",
+  "Stage selected": "暂存所选项",
+  "Unstage selected": "取消暂存所选项"
 }

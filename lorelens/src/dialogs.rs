@@ -303,28 +303,38 @@ impl Lens {
 
 impl Lens {
     pub(super) fn delete_dialog(&mut self, source: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        if self.busy { return; }
+        self.delete_files_dialog(vec![source], window, cx);
+    }
+
+    pub(super) fn delete_files_dialog(&mut self, sources: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy || sources.is_empty() { return; }
         let root = self.root.clone();
         let view = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _, _| {
-            let source = source.clone();
+            let sources = sources.clone();
             let root = root.clone();
             let view = view.clone();
             dialog.title(t("Delete")).confirm()
                 .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Delete")))
                 .child(div().flex().flex_col().gap_2()
-                    .child(source.display().to_string())
+                    .child(tf("{count} items selected", &[("count", sources.len().to_string())]))
+                    .child(div().id("delete-targets").max_h(px(240.)).overflow_y_scroll()
+                        .children(sources.iter().map(|source| div().child(source.display().to_string()))))
                     .child(t("Permanently delete this item? Folders and all their contents will be deleted. This does not use the Recycle Bin.")))
                 .on_ok(move |_, _, cx| {
                     let root = root.clone();
-                    let source = source.clone();
+                    let sources = sources.clone();
                     view.update(cx, |this, cx| {
                         if this.busy || this.root != root { return false; }
                         this.busy = true;
                         this.preview.invalidate();
                         this.notice = "Deleting…".into();
                         let task = cx.background_executor().spawn(async move {
-                            backend::delete_entry(&root, &source)
+                            for source in &sources {
+                                backend::delete_entry(&root, source)
+                                    .map_err(|error| format!("{}: {error}", source.display()))?;
+                            }
+                            Ok::<(), String>(())
                         });
                         cx.spawn(async move |this, cx| {
                             let result = task.await;

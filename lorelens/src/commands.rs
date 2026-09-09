@@ -134,7 +134,7 @@ impl Lens {
         self.log(format!("lore {}", args.join(" ")));
         let root = self.root.clone();
         let cli = self.cli.clone();
-        let directory = self.directory.clone();
+        let expanded = self.expanded_folders.clone();
         let title = title.to_string();
         let identity = self.settings.identity.clone();
         let kind = CommandKind::from_args(&args);
@@ -163,7 +163,7 @@ impl Lens {
             } else {
                 None
             };
-            let entries = status.then(|| backend::list_directory(&root, &directory));
+            let entries = status.then(|| backend::list_tree(&root, &expanded));
             let pending_push = status.then(|| {
                 result.as_ref().map_err(|e| e.clone()).and_then(|output| {
                     backend::pending_push(&cli, &root, output, identity.as_deref())

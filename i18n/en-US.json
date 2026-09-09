@@ -1,4 +1,7 @@
 {
+  "File": "File",
+  "Link": "Link",
+  "Unknown type": "Unknown type",
   "Revert selected files": "Revert selected files",
   "Restore all listed files to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.": "Restore all listed files to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.",
   "Generate message": "Generate message",
@@ -227,5 +230,10 @@
   "No matching changes in the selected scope.": "No matching changes in the selected scope.",
   "Choose whether to apply this command to the selected folders only or include all subfolders.": "Choose whether to apply this command to the selected folders only or include all subfolders.",
   "Selected folders only (direct files)": "Selected folders only (direct files)",
-  "Choose a folder scope before continuing.": "Choose a folder scope before continuing."
+  "Choose a folder scope before continuing.": "Choose a folder scope before continuing.",
+  "{count} changed files": "{count} changed files",
+  "No matching changes.": "No matching changes.",
+  "Copy selected full paths": "Copy selected full paths",
+  "Stage selected": "Stage selected",
+  "Unstage selected": "Unstage selected"
 }
