@@ -139,6 +139,7 @@
   "Discard": "변경 취소",
   "Show in Finder": "Finder에서 보기",
   "Show in Explorer": "탐색기에서 보기",
+  "Copy full path": "전체 경로 복사",
   "Open Command Window Here": "여기서 터미널 열기",
   "Checking lock status…": "잠금 상태 확인 중…",
   "Unlock": "잠금 해제",
@@ -202,5 +203,19 @@
   "Enter a repository URL including its scheme and repository name.": "스킴과 저장소 이름을 포함한 저장소 URL을 입력하세요.",
   "Creating repository…": "저장소 생성 중…",
   "Create failed — see details": "생성 실패 — 상세 내용 확인",
-  "Create failed": "생성 실패"
+  "Create failed": "생성 실패",
+  "Install Lore CLI": "Lore CLI ??",
+  "Install": "??",
+  "Lore CLI was not found. Install it with winget install EpicGames.Lore and save its path to the user environment variable LORELENS_LORE_BIN? Accepting also accepts the package and source agreements.": "Lore CLI? ?? ?????. winget install EpicGames.Lore? ???? ?? ??? ??? ?? ?? LORELENS_LORE_BIN?? ?????? ???? ??? ? ?? ?? ???? ?????.",
+  "Installing Lore CLI?": "Lore CLI ?? ??",
+  "Lore CLI installed. LORELENS_LORE_BIN has been saved.": "Lore CLI? ???? LORELENS_LORE_BIN? ??????.",
+  "Lore CLI installation failed. See command log.": "Lore CLI ??? ??????. ?? ??? ?????.",
+  "Obliterate…": "영구 제거(Obliterate)…",
+  "Obliterate file": "파일 영구 제거",
+  "Obliterate": "영구 제거",
+  "Type OBLITERATE to confirm": "OBLITERATE 입력",
+  "Type OBLITERATE to confirm permanent removal.": "영구 제거하려면 OBLITERATE를 입력하세요.",
+  "Enter OBLITERATE to continue.": "계속하려면 OBLITERATE를 입력하세요.",
+  "Select a single file inside the repository, outside metadata folders.": "저장소 내부에서 메타데이터 폴더를 제외한 단일 파일을 선택하세요.",
+  "Permanently remove the stored content of this file, delete its local copy, and stage its deletion. This cannot be undone and may affect the remote repository and revisions sharing this content. Other historical versions are not automatically removed.": "이 파일의 저장된 콘텐츠와 로컬 파일을 영구 제거하고 삭제를 스테이징합니다. 되돌릴 수 없으며 원격 저장소와 동일 콘텐츠를 참조하는 리비전에도 영향을 줄 수 있습니다. 다른 과거 버전까지 자동으로 제거하지는 않습니다."
 }

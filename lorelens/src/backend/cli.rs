@@ -33,8 +33,7 @@ pub fn find_cli() -> PathBuf {
         if development.is_file() {
             return development;
         }
-        // Keep a useful absolute path in the launch error when not yet bundled.
-        bundled.unwrap_or(development)
+        PathBuf::from("lore")
     }
 }
 
@@ -73,10 +72,17 @@ pub fn run_as(
         command.creation_flags(0x08000000);
     }
     let mut child = command.spawn().map_err(|e| {
-        format!(
+        let message = format!(
             "Cannot start {}: {e}\nChoose lore.exe with Locate CLI, or set LORELENS_LORE_BIN.",
             cli.display()
-        )
+        );
+        #[cfg(windows)]
+        if e.kind() == std::io::ErrorKind::NotFound {
+            return format!(
+                "{message}\nLore CLI was not found. Install it in PowerShell:\nwinget install EpicGames.Lore\nThen restart LoreLens or choose lore.exe with Locate CLI."
+            );
+        }
+        message
     })?;
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();

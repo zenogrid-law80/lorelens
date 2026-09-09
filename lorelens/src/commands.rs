@@ -10,6 +10,7 @@ enum CommandKind {
     SwitchBranch,
     Merge,
     Commit,
+    Obliterate,
     Other,
 }
 
@@ -27,6 +28,7 @@ impl CommandKind {
             (Some("branch"), Some("switch")) => Self::SwitchBranch,
             (Some("branch"), Some("merge")) => Self::Merge,
             (Some("commit"), _) => Self::Commit,
+            (Some("file"), Some("obliterate")) => Self::Obliterate,
             _ => Self::Other,
         }
     }
@@ -63,6 +65,7 @@ mod tests {
             (vec!["branch", "merge"], CommandKind::Merge),
             (vec!["sync"], CommandKind::Sync),
             (vec!["commit"], CommandKind::Commit),
+            (vec!["file", "obliterate", "--path=file"], CommandKind::Obliterate),
             (vec!["history"], CommandKind::Other),
             (vec![], CommandKind::Other),
         ];
@@ -106,6 +109,12 @@ impl Lens {
         cx: &mut Context<Self>,
     ) {
         if self.busy {
+            return;
+        }
+        #[cfg(windows)]
+        if cli_install::cli_missing(&self.cli) {
+            self.cli_install_pending = true;
+            cx.notify();
             return;
         }
         self.preview.invalidate();
@@ -328,7 +337,7 @@ impl Lens {
                         };
                         this.show_log = false;
                         this.log(e);
-                        if kind == CommandKind::Merge {
+                        if matches!(kind, CommandKind::Merge | CommandKind::Obliterate) {
                             this.refresh_pending = true;
                         }
                     }

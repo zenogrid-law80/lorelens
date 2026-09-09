@@ -139,6 +139,7 @@
   "Discard": "放弃更改",
   "Show in Finder": "在 Finder 中显示",
   "Show in Explorer": "在文件资源管理器中显示",
+  "Copy full path": "复制完整路径",
   "Open Command Window Here": "在此处打开命令窗口",
   "Checking lock status…": "正在检查锁定状态…",
   "Unlock": "解锁",
@@ -202,5 +203,19 @@
   "Enter a repository URL including its scheme and repository name.": "请输入包含协议和仓库名称的仓库 URL。",
   "Creating repository…": "正在创建仓库…",
   "Create failed — see details": "创建失败 — 请查看详情",
-  "Create failed": "创建失败"
+  "Create failed": "创建失败",
+  "Install Lore CLI": "?? Lore CLI",
+  "Install": "??",
+  "Lore CLI was not found. Install it with winget install EpicGames.Lore and save its path to the user environment variable LORELENS_LORE_BIN? Accepting also accepts the package and source agreements.": "??? Lore CLI????? winget install EpicGames.Lore ??????????????? LORELENS_LORE_BIN????????????????",
+  "Installing Lore CLI?": "???? Lore CLI?",
+  "Lore CLI installed. LORELENS_LORE_BIN has been saved.": "Lore CLI ????LORELENS_LORE_BIN ????",
+  "Lore CLI installation failed. See command log.": "Lore CLI ?????????????",
+  "Obliterate…": "永久清除…",
+  "Obliterate file": "永久清除文件",
+  "Obliterate": "永久清除",
+  "Type OBLITERATE to confirm": "输入 OBLITERATE 以确认",
+  "Type OBLITERATE to confirm permanent removal.": "输入 OBLITERATE 以确认永久清除。",
+  "Enter OBLITERATE to continue.": "请输入 OBLITERATE 以继续。",
+  "Select a single file inside the repository, outside metadata folders.": "请选择仓库内元数据文件夹以外的单个文件。",
+  "Permanently remove the stored content of this file, delete its local copy, and stage its deletion. This cannot be undone and may affect the remote repository and revisions sharing this content. Other historical versions are not automatically removed.": "永久清除此文件的存储内容，删除本地副本并暂存删除操作。此操作无法撤销，可能影响远程仓库及引用相同内容的修订。其他历史版本不会自动清除。"
 }

@@ -1,6 +1,66 @@
 use super::*;
 
 impl Lens {
+    pub(super) fn obliterate_dialog(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy || !self.connected { return; }
+        if let Err(error) = backend::obliterate_args(&self.root, &path) {
+            self.log(error);
+            cx.notify();
+            return;
+        }
+        let root = self.root.clone();
+        let branch = self.status.branch.clone();
+        let revision = self.status.revision.clone();
+        let identity = self.settings.identity.clone();
+        let confirmation = cx.new(|cx| TextInput::new("Type OBLITERATE to confirm", cx));
+        let validation = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        let view = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let (path, root, branch, revision, identity) =
+                (path.clone(), root.clone(), branch.clone(), revision.clone(), identity.clone());
+            let input = confirmation.clone();
+            let view = view.clone();
+            let validation = validation.clone();
+            let error = t(&validation.borrow());
+            dialog.title(t("Obliterate file")).confirm()
+                .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Obliterate")))
+                .child(div().flex().flex_col().gap_2()
+                    .child(root.display().to_string())
+                    .child(path.clone())
+                    .child(t("Permanently remove the stored content of this file, delete its local copy, and stage its deletion. This cannot be undone and may affect the remote repository and revisions sharing this content. Other historical versions are not automatically removed."))
+                    .child(t("Type OBLITERATE to confirm permanent removal."))
+                    .child(confirmation.clone())
+                    .child(error))
+                .on_ok(move |_, window, cx| {
+                    if input.read(cx).content.trim() != "OBLITERATE" {
+                        *validation.borrow_mut() = "Enter OBLITERATE to continue.".into();
+                        window.refresh();
+                        return false;
+                    }
+                    view.update(cx, |this, cx| {
+                        if this.busy || !this.connected || this.root != root || this.status.branch != branch
+                            || this.status.revision != revision || this.settings.identity != identity {
+                            *validation.borrow_mut() = "Repository state changed. Reopen this dialog.".into();
+                            window.refresh();
+                            return false;
+                        }
+                        match backend::obliterate_args(&root, &path) {
+                            Ok(args) => {
+                                this.selection.clear();
+                                this.command(args, "Obliterate file", false, true, cx);
+                                true
+                            }
+                            Err(error) => {
+                                *validation.borrow_mut() = error;
+                                window.refresh();
+                                false
+                            }
+                        }
+                    }).unwrap_or(false)
+                })
+        });
+    }
+
     pub(super) fn create_repository_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.busy { return; }
         let url = cx.new(|cx| TextInput::new("lores://server:port/repository", cx));

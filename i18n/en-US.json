@@ -139,6 +139,7 @@
   "Discard": "Discard",
   "Show in Finder": "Show in Finder",
   "Show in Explorer": "Show in Explorer",
+  "Copy full path": "Copy full path",
   "Open Command Window Here": "Open Command Window Here",
   "Checking lock status…": "Checking lock status…",
   "Unlock": "Unlock",
@@ -202,5 +203,19 @@
   "Enter a repository URL including its scheme and repository name.": "Enter a repository URL including its scheme and repository name.",
   "Creating repository…": "Creating repository…",
   "Create failed — see details": "Create failed — see details",
-  "Create failed": "Create failed"
+  "Create failed": "Create failed",
+  "Install Lore CLI": "Install Lore CLI",
+  "Install": "Install",
+  "Lore CLI was not found. Install it with winget install EpicGames.Lore and save its path to the user environment variable LORELENS_LORE_BIN? Accepting also accepts the package and source agreements.": "Lore CLI was not found. Install it with winget install EpicGames.Lore and save its path to the user environment variable LORELENS_LORE_BIN? Accepting also accepts the package and source agreements.",
+  "Installing Lore CLI?": "Installing Lore CLI?",
+  "Lore CLI installed. LORELENS_LORE_BIN has been saved.": "Lore CLI installed. LORELENS_LORE_BIN has been saved.",
+  "Lore CLI installation failed. See command log.": "Lore CLI installation failed. See command log.",
+  "Obliterate…": "Obliterate…",
+  "Obliterate file": "Obliterate file",
+  "Obliterate": "Obliterate",
+  "Type OBLITERATE to confirm": "Type OBLITERATE to confirm",
+  "Type OBLITERATE to confirm permanent removal.": "Type OBLITERATE to confirm permanent removal.",
+  "Enter OBLITERATE to continue.": "Enter OBLITERATE to continue.",
+  "Select a single file inside the repository, outside metadata folders.": "Select a single file inside the repository, outside metadata folders.",
+  "Permanently remove the stored content of this file, delete its local copy, and stage its deletion. This cannot be undone and may affect the remote repository and revisions sharing this content. Other historical versions are not automatically removed.": "Permanently remove the stored content of this file, delete its local copy, and stage its deletion. This cannot be undone and may affect the remote repository and revisions sharing this content. Other historical versions are not automatically removed."
 }

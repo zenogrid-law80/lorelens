@@ -9,6 +9,8 @@ mod backend;
 mod branches;
 mod commands;
 mod dialogs;
+#[cfg(windows)]
+mod cli_install;
 mod external_tools;
 mod file_browser;
 mod i18n;
@@ -90,6 +92,8 @@ struct Lens {
     show_branches: bool,
     connect_after_load: bool,
     startup_login_pending: bool,
+    #[cfg(windows)]
+    cli_install_pending: bool,
     refresh_pending: bool,
     logged_in_account: String,
     pending_push: Result<Vec<String>, String>,
@@ -285,6 +289,8 @@ impl Lens {
             settings, settings_error, branch_output: String::new(), show_branches: false,
             connect_after_load,
             startup_login_pending: false,
+            #[cfg(windows)]
+            cli_install_pending: false,
             refresh_pending: false,
             logged_in_account: "Not signed in".into(),
             local_branches: Vec::new(),
@@ -627,6 +633,14 @@ impl Lens {
         )
         .on_click(cx.listener(move |this, _, _, cx| this.select(path.clone(), cx)))
         .context_menu(move |mut menu, _, cx| {
+            let copy_path = context_root.join(&context_path);
+            menu = menu.item(PopupMenuItem::new(t("Copy full path")).on_click(
+                move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(
+                        copy_path.to_string_lossy().into_owned(),
+                    ));
+                },
+            )).separator();
             let state = view.upgrade().and_then(|entity| {
                 let lens = entity.read(cx);
                 if lens.root != context_root { return None; }
@@ -654,6 +668,16 @@ impl Lens {
                         });
                     }));
             }
+            let obliterate_view = view.clone();
+            let obliterate_path = context_path.clone();
+            let obliterate_root = context_root.clone();
+            menu = menu.item(PopupMenuItem::new(t("Obliterate…"))
+                .disabled(!enabled || backend::obliterate_args(&context_root, &context_path).is_err())
+                .on_click(move |_, window, cx| {
+                    let _ = obliterate_view.update(cx, |this, cx| {
+                        if this.root == obliterate_root { this.obliterate_dialog(obliterate_path.clone(), window, cx); }
+                    });
+                }));
             for unstage_only in [true, false] {
                 if (unstage_only && !staged) || (!unstage_only && !revert) { continue; }
                 let view = view.clone();
@@ -789,11 +813,19 @@ fn main() {
                     let view = cx.new(|cx| Lens::new(root, settings, settings_error, cx));
                     view.update(cx, |this, cx| {
                         cx.observe_in(&cx.entity(), window, |this, _, window, cx| {
+                            #[cfg(windows)]
+                            if this.cli_install_pending && !this.busy {
+                                this.cli_install_pending = false;
+                                this.install_cli_dialog(window, cx);
+                                return;
+                            }
                             if this.startup_login_pending && !this.busy {
                                 this.startup_login_pending = false;
                                 this.login_dialog(window, cx);
                             }
                         }).detach();
+                        #[cfg(windows)]
+                        { this.cli_install_pending = cli_install::cli_missing(&this.cli); }
                         let cli = this.cli.clone();
                         let root = this.root.clone();
                         let identity = this.settings.identity.clone();

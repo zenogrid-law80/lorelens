@@ -1,6 +1,8 @@
 mod cli;
 mod filesystem;
 mod ignore;
+mod obliterate;
+pub use obliterate::obliterate_args;
 pub use cli::{find_cli, run_as};
 pub fn is_repository(root: &Path) -> bool {
     root.join(".lore").is_dir() || root.join(".urc").is_dir()

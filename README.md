@@ -24,6 +24,14 @@ cargo build -p lore-client --bin lore
 
 The app looks for the Lore CLI in this order: `LORELENS_LORE_BIN`, the bundled platform path (`dist/lore.exe` on Windows and `dis/lore` on macOS), and then `lore` on `PATH`. You can also choose it with **Locate CLI…**. After opening a workspace, **Refresh** displays the result of `lore status --scan --json`.
 
+On Windows, if the Lore CLI cannot be found at startup or when running a command, LoreLens asks whether to install it using:
+
+```powershell
+winget install EpicGames.Lore
+```
+
+Accepting runs winget in the background and accepts its package and source agreements. After installation, LoreLens locates `lore.exe`, saves its absolute path to the Windows user environment variable `LORELENS_LORE_BIN` and the app settings, and uses it immediately without restarting. Canceling skips installation. Installation or path detection failures appear in Details / Command log; you can also select the executable with **Locate CLI…**.
+
 ## Usage
 
 Right-click a file or folder in the left panel and choose `Move…`. Check the source and enter a destination path including the new name. Relative paths are resolved from the repository root. Moving outside the repository and overwriting an existing destination are rejected. Refresh after moving to detect the change.
@@ -85,6 +93,12 @@ cargo build
 ```
 
 The main modules are `src/main.rs` (application state), `src/view.rs` and related view modules (UI), `src/backend/` (CLI, filesystem, and ignore handling), `src/input.rs` (GPUI text input), and `src/settings.rs` (persistent settings). See the [GPUI documentation](https://gpui.rs/).
+
+## 파일 콘텐츠 영구 제거 (Obliterate)
+
+Files 또는 대기 중인 변경 목록에서 파일 우클릭 → **영구 제거(Obliterate)…**를 선택합니다. 저장소와 파일 경로, 영향을 확인한 뒤 확인 문구 `OBLITERATE`를 입력해야 실행됩니다. 폴더, 저장소 메타데이터, 심볼릭 링크/정션은 대상으로 허용하지 않습니다. 로컬에서 이미 삭제된 파일도 대기 중인 변경 목록에서 선택할 수 있으며, 실제 대상은 Lore가 현재/스테이징 상태에서 확인합니다.
+
+`lore file obliterate --path=<파일>`로 해당 파일의 저장된 콘텐츠를 영구 제거하고 로컬 파일 삭제를 스테이징합니다. 원격 저장소 및 같은 콘텐츠를 참조하는 리비전에 영향을 줄 수 있으며 되돌릴 수 없습니다. 파일의 모든 과거 버전을 일괄 제거하는 기능은 아닙니다. 커밋과 Push는 자동 실행하지 않습니다. 권한·CLI 오류는 Details / Command log에서 확인할 수 있으며, 부분 실패 가능성을 고려해 실패 후에도 상태를 새로고침합니다.
 
 ## External diff and merge tools
 

@@ -330,6 +330,7 @@ impl Lens {
                             };
                             let terminal_path = context_path.clone();
                             let reveal_path = context_path.clone();
+                            let copy_path = context_path.clone();
                             let view = view.clone();
                             let staging = view.upgrade().and_then(|entity| {
                                 let lens = entity.read(cx);
@@ -447,6 +448,22 @@ impl Lens {
                             } else {
                                 menu
                             };
+                            let menu = if !directory {
+                                let action_view = view.clone();
+                                let path = context_relative.clone();
+                                let root = context_root.clone();
+                                let enabled = view.upgrade().is_some_and(|entity| {
+                                    let lens = entity.read(cx);
+                                    !lens.busy && lens.connected && lens.root == root
+                                        && backend::obliterate_args(&root, &path).is_ok()
+                                });
+                                menu.item(PopupMenuItem::new(t("Obliterate…")).disabled(!enabled)
+                                    .on_click(move |_, window, cx| {
+                                        let _ = action_view.update(cx, |this, cx| {
+                                            if this.root == root { this.obliterate_dialog(path.clone(), window, cx); }
+                                        });
+                                    })).separator()
+                            } else { menu };
                             let move_view = view.clone();
                             let delete_view = view.clone();
                             let delete_path = context_path.clone();
@@ -470,6 +487,13 @@ impl Lens {
                                 .separator();
                             let terminal_view = view.clone();
                             let menu = menu
+                                .item(PopupMenuItem::new(t("Copy full path")).on_click(
+                                    move |_, _, cx| {
+                                        cx.write_to_clipboard(ClipboardItem::new_string(
+                                            copy_path.to_string_lossy().into_owned(),
+                                        ));
+                                    },
+                                ))
                                 .item(
                                     PopupMenuItem::new(t(if cfg!(target_os = "macos") {
                                         "Show in Finder"
