@@ -26,7 +26,7 @@ PowerShell에서 프로젝트 루트 기준으로 실행합니다.
 .\packaging\build-msi.ps1
 ```
 
-스크립트는 Release 실행 파일을 빌드하고, 필요한 경우 WiX 6.0.2를 `.tools` 아래에 설치한 뒤 Cargo.toml 버전으로 x64 MSI(현재 `dist\LoreLens-0.1.3.msi`)를 생성합니다. Lore CLI는 포함하지 않으며, 앱의 설치 안내 또는 `Locate CLI…`로 연결합니다.
+스크립트는 Release 실행 파일을 빌드하고, 필요한 경우 WiX 6.0.2를 `.tools` 아래에 설치한 뒤 Cargo.toml 버전으로 x64 MSI(현재 `dist\LoreLens-0.1.4.msi`)를 생성합니다. Lore CLI는 포함하지 않으며, 앱의 설치 안내 또는 `Locate CLI…`로 연결합니다.
 
 이미 `target\release\lorelens.exe`가 있다면 다음처럼 Rust 빌드를 건너뛸 수 있습니다.
 
