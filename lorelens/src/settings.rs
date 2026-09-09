@@ -1,369 +1,401 @@
 use serde_json::{Value, json};
 use std::{
-    fs, io,
-    path::{Path, PathBuf},
+  fs, io,
+  path::{Path, PathBuf},
 };
 
 pub struct Settings {
-    pub login_remote: Option<String>,
-    pub login_urls: Vec<String>,
-    pub recent: Vec<PathBuf>,
-    pub cli: Option<PathBuf>,
-    pub theme: String,
-    pub language: String,
-    pub external_tool: String,
-    pub tool_paths: std::collections::BTreeMap<String, PathBuf>,
-    pub identity: Option<String>,
-    pub create_url: String,
-    pub create_destination: String,
-    pub create_urls: Vec<String>,
-    pub create_destinations: Vec<String>,
-    pub clone_url: String,
-    pub clone_destination: String,
-    pub clone_urls: Vec<String>,
-    pub clone_destinations: Vec<String>,
+  pub shortcuts: std::collections::BTreeMap<String, String>,
+  pub login_remote: Option<String>,
+  pub login_urls: Vec<String>,
+  pub recent: Vec<PathBuf>,
+  pub cli: Option<PathBuf>,
+  pub theme: String,
+  pub language: String,
+  pub external_tool: String,
+  pub tool_paths: std::collections::BTreeMap<String, PathBuf>,
+  pub identity: Option<String>,
+  pub create_url: String,
+  pub create_destination: String,
+  pub create_urls: Vec<String>,
+  pub create_destinations: Vec<String>,
+  pub clone_url: String,
+  pub clone_destination: String,
+  pub clone_urls: Vec<String>,
+  pub clone_destinations: Vec<String>,
 }
 
 impl Default for Settings {
-    fn default() -> Self {
-        Self { login_remote: None, login_urls: Vec::new(), recent: Vec::new(), cli: None, theme: "System".into(), language: "en-US".into(), external_tool: "idea".into(), tool_paths: Default::default(), identity: None, create_url: String::new(), create_destination: String::new(), create_urls: Vec::new(), create_destinations: Vec::new(), clone_url: String::new(), clone_destination: String::new(), clone_urls: Vec::new(), clone_destinations: Vec::new() }
+  fn default() -> Self {
+    Self {
+      shortcuts: Default::default(),
+      login_remote: None,
+      login_urls: Vec::new(),
+      recent: Vec::new(),
+      cli: None,
+      theme: "System".into(),
+      language: "en-US".into(),
+      external_tool: "idea".into(),
+      tool_paths: Default::default(),
+      identity: None,
+      create_url: String::new(),
+      create_destination: String::new(),
+      create_urls: Vec::new(),
+      create_destinations: Vec::new(),
+      clone_url: String::new(),
+      clone_destination: String::new(),
+      clone_urls: Vec::new(),
+      clone_destinations: Vec::new(),
     }
+  }
 }
 
 impl Settings {
-    fn normalize_recent_path(path: &Path) -> PathBuf {
-        #[cfg(windows)]
-        if let Some(text) = path.to_str() {
-            let text = text.replace('/', "\\");
-            if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-                return PathBuf::from(format!(r"\\{rest}"));
-            }
-            if let Some(rest) = text.strip_prefix(r"\\?\") {
-                // Only strip extended drive-path prefixes, not other device paths.
-                if rest.as_bytes().get(1) == Some(&b':') {
-                    return PathBuf::from(rest);
-                }
-            }
-            return PathBuf::from(text);
+  fn normalize_recent_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    if let Some(text) = path.to_str() {
+      let text = text.replace('/', "\\");
+      if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+      }
+      if let Some(rest) = text.strip_prefix(r"\\?\") {
+        // Only strip extended drive-path prefixes, not other device paths.
+        if rest.as_bytes().get(1) == Some(&b':') {
+          return PathBuf::from(rest);
         }
-        path.to_path_buf()
+      }
+      return PathBuf::from(text);
     }
+    path.to_path_buf()
+  }
 
-    fn recent_key(path: &Path) -> PathBuf {
-        #[cfg(windows)]
-        if let Some(text) = path.to_str() {
-            return PathBuf::from(text.to_ascii_lowercase());
-        }
-        path.to_path_buf()
+  fn recent_key(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    if let Some(text) = path.to_str() {
+      return PathBuf::from(text.to_ascii_lowercase());
     }
+    path.to_path_buf()
+  }
 
-    fn normalized_recent(paths: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
-        let mut seen = std::collections::HashSet::new();
-        paths.into_iter().map(|path| Self::normalize_recent_path(&path))
-            .filter(|path| seen.insert(Self::recent_key(path))).take(10).collect()
+  fn normalized_recent(paths: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
+    let mut seen = std::collections::HashSet::new();
+    paths
+      .into_iter()
+      .map(|path| Self::normalize_recent_path(&path))
+      .filter(|path| seen.insert(Self::recent_key(path)))
+      .take(10)
+      .collect()
+  }
+  /// Older settings stored login input history but no successful-login URL.
+  /// Only recover an unambiguous destination; history is not proof of authentication.
+  pub fn clone_remote(&self) -> Option<String> {
+    if let Some(remote) = self.login_remote.as_deref().map(str::trim).filter(|url| !url.is_empty()) {
+      return Some(remote.into());
     }
-    /// Older settings stored login input history but no successful-login URL.
-    /// Only recover an unambiguous destination; history is not proof of authentication.
-    pub fn clone_remote(&self) -> Option<String> {
-        if let Some(remote) = self.login_remote.as_deref().map(str::trim).filter(|url| !url.is_empty()) {
-            return Some(remote.into());
-        }
-        let mut candidates = self.login_urls.iter().map(|url| url.trim()).filter(|url| !url.is_empty());
-        let remote = candidates.next()?;
-        if candidates.any(|other| other != remote) {
-            return None;
-        }
-        Some(remote.into())
+    let mut candidates = self.login_urls.iter().map(|url| url.trim()).filter(|url| !url.is_empty());
+    let remote = candidates.next()?;
+    if candidates.any(|other| other != remote) {
+      return None;
     }
+    Some(remote.into())
+  }
 
-    pub fn path() -> PathBuf {
-        if let Some(base) = std::env::var_os("LOCALAPPDATA") {
-            PathBuf::from(base).join("LoreLens/settings.json")
-        } else {
-            std::env::var_os("XDG_CONFIG_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
-                    PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config")
-                })
-                .join("lorelens/settings.json")
-        }
+  pub fn path() -> PathBuf {
+    if let Some(base) = std::env::var_os("LOCALAPPDATA") {
+      PathBuf::from(base).join("LoreLens/settings.json")
+    } else {
+      std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"))
+        .join("lorelens/settings.json")
     }
+  }
 
-    pub fn load(path: &Path) -> io::Result<Self> {
-        let text = match fs::read_to_string(path) {
-            Ok(text) => text,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
-            Err(e) => return Err(e),
-        };
-        let data: Value = serde_json::from_str(&text)?;
-        let recent: Vec<PathBuf> =
-            serde_json::from_value(data.get("recent").cloned().unwrap_or(json!([])))?;
-        let cli = serde_json::from_value(data.get("cli").cloned().unwrap_or(Value::Null))?;
-        Ok(Self {
-            login_remote: data["login_remote"].as_str().filter(|url| !url.trim().is_empty()).map(str::to_owned),
-            login_urls: serde_json::from_value(data.get("login_urls").cloned().unwrap_or(json!([])))?,
-            recent: Self::normalized_recent(recent),
-            cli,
-            language: crate::i18n::normalize(data["language"].as_str().unwrap_or("en-US")).into(),
-            theme: data["theme"].as_str().unwrap_or("System").to_string(),
-            external_tool: data["external_tool"].as_str()
-                .or_else(|| data["diff_tool"].as_str())
-                .or_else(|| data["merge_tool"].as_str())
-                .unwrap_or("idea").into(),
-            tool_paths: serde_json::from_value(data.get("tool_paths").cloned().unwrap_or(json!({})))?,
-            identity: data["identity"].as_str().filter(|id| !id.is_empty()).map(str::to_string),
-            create_url: data["create_url"].as_str().unwrap_or_default().into(),
-            create_destination: data["create_destination"].as_str().unwrap_or_default().into(),
-            create_urls: serde_json::from_value(data.get("create_urls").cloned().unwrap_or(json!([])))?,
-            create_destinations: serde_json::from_value(data.get("create_destinations").cloned().unwrap_or(json!([])))?,
-            clone_url: data["clone_url"].as_str().unwrap_or_default().into(),
-            clone_destination: data["clone_destination"].as_str().unwrap_or_default().into(),
-            clone_urls: serde_json::from_value(data.get("clone_urls").cloned().unwrap_or(json!([])))?,
-            clone_destinations: serde_json::from_value(data.get("clone_destinations").cloned().unwrap_or(json!([])))?,
-        })
-    }
+  pub fn load(path: &Path) -> io::Result<Self> {
+    let text = match fs::read_to_string(path) {
+      Ok(text) => text,
+      Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
+      Err(e) => return Err(e),
+    };
+    let data: Value = serde_json::from_str(&text)?;
+    let recent: Vec<PathBuf> = serde_json::from_value(data.get("recent").cloned().unwrap_or(json!([])))?;
+    let cli = serde_json::from_value(data.get("cli").cloned().unwrap_or(Value::Null))?;
+    Ok(Self {
+      shortcuts: serde_json::from_value(data.get("shortcuts").cloned().unwrap_or(json!({})))?,
+      login_remote: data["login_remote"].as_str().filter(|url| !url.trim().is_empty()).map(str::to_owned),
+      login_urls: serde_json::from_value(data.get("login_urls").cloned().unwrap_or(json!([])))?,
+      recent: Self::normalized_recent(recent),
+      cli,
+      language: crate::i18n::normalize(data["language"].as_str().unwrap_or("en-US")).into(),
+      theme: data["theme"].as_str().unwrap_or("System").to_string(),
+      external_tool: data["external_tool"]
+        .as_str()
+        .or_else(|| data["diff_tool"].as_str())
+        .or_else(|| data["merge_tool"].as_str())
+        .unwrap_or("idea")
+        .into(),
+      tool_paths: serde_json::from_value(data.get("tool_paths").cloned().unwrap_or(json!({})))?,
+      identity: data["identity"].as_str().filter(|id| !id.is_empty()).map(str::to_string),
+      create_url: data["create_url"].as_str().unwrap_or_default().into(),
+      create_destination: data["create_destination"].as_str().unwrap_or_default().into(),
+      create_urls: serde_json::from_value(data.get("create_urls").cloned().unwrap_or(json!([])))?,
+      create_destinations: serde_json::from_value(data.get("create_destinations").cloned().unwrap_or(json!([])))?,
+      clone_url: data["clone_url"].as_str().unwrap_or_default().into(),
+      clone_destination: data["clone_destination"].as_str().unwrap_or_default().into(),
+      clone_urls: serde_json::from_value(data.get("clone_urls").cloned().unwrap_or(json!([])))?,
+      clone_destinations: serde_json::from_value(data.get("clone_destinations").cloned().unwrap_or(json!([])))?,
+    })
+  }
 
-    pub fn remember(&mut self, path: &Path) {
-        self.recent = Self::normalized_recent(std::iter::once(path.to_path_buf()).chain(self.recent.iter().cloned()));
-    }
+  pub fn remember(&mut self, path: &Path) {
+    self.recent = Self::normalized_recent(std::iter::once(path.to_path_buf()).chain(self.recent.iter().cloned()));
+  }
 
-    pub fn prune_recent(&mut self) -> bool {
-        let before = self.recent.len();
-        self.recent.retain(|path| match fs::metadata(path) {
-            Ok(metadata) => metadata.is_dir(),
-            Err(error) => error.kind() != io::ErrorKind::NotFound,
-        });
-        self.recent.len() != before
-    }
+  pub fn prune_recent(&mut self) -> bool {
+    let before = self.recent.len();
+    self.recent.retain(|path| match fs::metadata(path) {
+      Ok(metadata) => metadata.is_dir(),
+      Err(error) => error.kind() != io::ErrorKind::NotFound,
+    });
+    self.recent.len() != before
+  }
 
-    pub fn remember_create(&mut self, url: &str, destination: &str) {
-        self.create_url = url.trim().into();
-        self.create_destination = destination.trim().into();
-        for (history, value) in [(&mut self.create_urls, &self.create_url), (&mut self.create_destinations, &self.create_destination)] {
-            if value.is_empty() { continue; }
-            history.retain(|entry| entry != value);
-            history.insert(0, value.clone());
-            history.truncate(10);
-        }
+  pub fn remember_create(&mut self, url: &str, destination: &str) {
+    self.create_url = url.trim().into();
+    self.create_destination = destination.trim().into();
+    for (history, value) in [(&mut self.create_urls, &self.create_url), (&mut self.create_destinations, &self.create_destination)] {
+      if value.is_empty() {
+        continue;
+      }
+      history.retain(|entry| entry != value);
+      history.insert(0, value.clone());
+      history.truncate(10);
     }
+  }
 
-    pub fn remember_clone(&mut self) {
-        for (history, value) in [(&mut self.clone_urls, &self.clone_url), (&mut self.clone_destinations, &self.clone_destination)] {
-            let value = value.trim();
-            if value.is_empty() { continue; }
-            history.retain(|entry| entry != value);
-            history.insert(0, value.into());
-            history.truncate(10);
-        }
+  pub fn remember_clone(&mut self) {
+    for (history, value) in [(&mut self.clone_urls, &self.clone_url), (&mut self.clone_destinations, &self.clone_destination)] {
+      let value = value.trim();
+      if value.is_empty() {
+        continue;
+      }
+      history.retain(|entry| entry != value);
+      history.insert(0, value.into());
+      history.truncate(10);
     }
+  }
 
-    pub fn restore(&self) -> Option<PathBuf> {
-        self.recent.iter().find(|path| path.is_dir()).cloned()
-    }
+  pub fn restore(&self) -> Option<PathBuf> {
+    self.recent.iter().find(|path| path.is_dir()).cloned()
+  }
 
-    pub fn remember_login(&mut self, url: &str) {
-        let url = url.trim();
-        if url.is_empty() { return; }
-        self.login_urls.retain(|entry| entry != url);
-        self.login_urls.insert(0, url.into());
-        self.login_urls.truncate(10);
+  pub fn remember_login(&mut self, url: &str) {
+    let url = url.trim();
+    if url.is_empty() {
+      return;
     }
+    self.login_urls.retain(|entry| entry != url);
+    self.login_urls.insert(0, url.into());
+    self.login_urls.truncate(10);
+  }
 
-    pub fn save(&self, path: &Path) -> io::Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let temp = path.with_extension(format!("{}.tmp", std::process::id()));
-        let mut file = fs::File::create(&temp)?;
-        serde_json::to_writer_pretty(&mut file, &json!({"login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "recent": Self::normalized_recent(self.recent.clone()), "cli": self.cli, "theme": self.theme, "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}))?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(temp, path)
+  pub fn save(&self, path: &Path) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+      fs::create_dir_all(parent)?;
     }
+    let temp = path.with_extension(format!("{}.tmp", std::process::id()));
+    let mut file = fs::File::create(&temp)?;
+    serde_json::to_writer_pretty(
+      &mut file,
+      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "recent": Self::normalized_recent(self.recent.clone()), "cli": self.cli, "theme": self.theme, "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
+    )?;
+    file.sync_all()?;
+    drop(file);
+    fs::rename(temp, path)
+  }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    #[test]
-    fn create_history_survives_restart_and_is_bounded() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        fs::write(&path, "{}").unwrap();
-        let mut settings = Settings::load(&path).unwrap();
-        assert!(settings.create_urls.is_empty());
-        assert!(settings.create_destination.is_empty());
-        for i in 0..12 {
-            settings.remember_create(&format!("lores://server/repo-{i}"), &format!("C:/작업/repo-{i}"));
-        }
-        settings.remember_create("  lores://server/repo-5  ", " C:/작업/repo-5 ");
-        assert_eq!(settings.create_urls.len(), 10);
-        assert_eq!(settings.create_destinations.len(), 10);
-        assert_eq!(settings.create_urls[0], "lores://server/repo-5");
-        assert_eq!(settings.create_destinations[0], "C:/작업/repo-5");
-        assert_eq!(settings.create_urls.iter().filter(|url| *url == "lores://server/repo-5").count(), 1);
-        settings.save(&path).unwrap();
-        let restored = Settings::load(&path).unwrap();
-        assert_eq!(restored.create_url, settings.create_url);
-        assert_eq!(restored.create_destination, settings.create_destination);
-        assert_eq!(restored.create_urls, settings.create_urls);
-        assert_eq!(restored.create_destinations, settings.create_destinations);
-        settings.remember_create(" ", " ");
-        assert_eq!(settings.create_urls, restored.create_urls);
-        assert_eq!(settings.create_destinations, restored.create_destinations);
-        assert!(settings.clone_urls.is_empty());
+  use super::*;
+  #[test]
+  fn create_history_survives_restart_and_is_bounded() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    fs::write(&path, "{}").unwrap();
+    let mut settings = Settings::load(&path).unwrap();
+    assert!(settings.create_urls.is_empty());
+    assert!(settings.create_destination.is_empty());
+    for i in 0..12 {
+      settings.remember_create(&format!("lores://server/repo-{i}"), &format!("C:/작업/repo-{i}"));
     }
+    settings.remember_create("  lores://server/repo-5  ", " C:/작업/repo-5 ");
+    assert_eq!(settings.create_urls.len(), 10);
+    assert_eq!(settings.create_destinations.len(), 10);
+    assert_eq!(settings.create_urls[0], "lores://server/repo-5");
+    assert_eq!(settings.create_destinations[0], "C:/작업/repo-5");
+    assert_eq!(settings.create_urls.iter().filter(|url| *url == "lores://server/repo-5").count(), 1);
+    settings.save(&path).unwrap();
+    let restored = Settings::load(&path).unwrap();
+    assert_eq!(restored.create_url, settings.create_url);
+    assert_eq!(restored.create_destination, settings.create_destination);
+    assert_eq!(restored.create_urls, settings.create_urls);
+    assert_eq!(restored.create_destinations, settings.create_destinations);
+    settings.remember_create(" ", " ");
+    assert_eq!(settings.create_urls, restored.create_urls);
+    assert_eq!(settings.create_destinations, restored.create_destinations);
+    assert!(settings.clone_urls.is_empty());
+  }
 
-    #[test]
-    fn pruning_recent_removes_missing_directories_and_files_and_persists() {
-        let root = tempfile::tempdir().unwrap();
-        let folder = root.path().join("repository");
-        fs::create_dir(&folder).unwrap();
-        let file = root.path().join("plain-file");
-        fs::write(&file, "file").unwrap();
-        let mut settings = Settings::default();
-        settings.recent = vec![root.path().join("missing"), folder.clone(), file];
-        assert!(settings.prune_recent());
-        assert_eq!(settings.recent, vec![folder]);
-        assert!(!settings.prune_recent());
-        let path = root.path().join("settings.json");
-        settings.save(&path).unwrap();
-        assert_eq!(Settings::load(&path).unwrap().recent, settings.recent);
-    }
-    #[test]
-    fn clone_recovers_legacy_login_url_without_guessing_between_servers() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        fs::write(&path, r#"{"login_urls":["lores://server:41337"]}"#).unwrap();
-        let mut settings = Settings::load(&path).unwrap();
-        assert_eq!(settings.clone_remote().as_deref(), Some("lores://server:41337"));
-        assert!(settings.login_remote.is_none());
-        settings.save(&path).unwrap();
-        assert_eq!(Settings::load(&path).unwrap().clone_remote(), settings.clone_remote());
-        settings.remember_login("lores://other:41337");
-        assert!(settings.clone_remote().is_none());
-        settings.login_remote = Some("lores://signed-in:41337".into());
-        assert_eq!(settings.clone_remote().as_deref(), Some("lores://signed-in:41337"));
-        assert!(Settings::default().clone_remote().is_none());
-    }
+  #[test]
+  fn pruning_recent_removes_missing_directories_and_files_and_persists() {
+    let root = tempfile::tempdir().unwrap();
+    let folder = root.path().join("repository");
+    fs::create_dir(&folder).unwrap();
+    let file = root.path().join("plain-file");
+    fs::write(&file, "file").unwrap();
+    let mut settings = Settings::default();
+    settings.recent = vec![root.path().join("missing"), folder.clone(), file];
+    assert!(settings.prune_recent());
+    assert_eq!(settings.recent, vec![folder]);
+    assert!(!settings.prune_recent());
+    let path = root.path().join("settings.json");
+    settings.save(&path).unwrap();
+    assert_eq!(Settings::load(&path).unwrap().recent, settings.recent);
+  }
+  #[test]
+  fn clone_recovers_legacy_login_url_without_guessing_between_servers() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    fs::write(&path, r#"{"login_urls":["lores://server:41337"]}"#).unwrap();
+    let mut settings = Settings::load(&path).unwrap();
+    assert_eq!(settings.clone_remote().as_deref(), Some("lores://server:41337"));
+    assert!(settings.login_remote.is_none());
+    settings.save(&path).unwrap();
+    assert_eq!(Settings::load(&path).unwrap().clone_remote(), settings.clone_remote());
+    settings.remember_login("lores://other:41337");
+    assert!(settings.clone_remote().is_none());
+    settings.login_remote = Some("lores://signed-in:41337".into());
+    assert_eq!(settings.clone_remote().as_deref(), Some("lores://signed-in:41337"));
+    assert!(Settings::default().clone_remote().is_none());
+  }
 
-    #[test]
-    fn login_history_survives_restart_and_deduplicates() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        let mut settings = Settings::default();
-        for i in 0..12 {
-            settings.remember_login(&format!("lores://server-{i}:443"));
-        }
-        settings.remember_login("  lores://server-5:443  ");
-        settings.remember_login(" ");
-        assert_eq!(settings.login_urls.len(), 10);
-        assert_eq!(settings.login_urls[0], "lores://server-5:443");
-        assert_eq!(settings.login_urls.iter().filter(|url| *url == "lores://server-5:443").count(), 1);
-        settings.save(&path).unwrap();
-        let mut restarted = Settings::load(&path).unwrap();
-        assert_eq!(restarted.login_urls, settings.login_urls);
-        restarted.theme = "Light".into();
-        restarted.save(&path).unwrap();
-        assert_eq!(Settings::load(&path).unwrap().login_urls, settings.login_urls);
-        fs::write(&path, "{}").unwrap();
-        assert!(Settings::load(&path).unwrap().login_urls.is_empty());
+  #[test]
+  fn login_history_survives_restart_and_deduplicates() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    let mut settings = Settings::default();
+    for i in 0..12 {
+      settings.remember_login(&format!("lores://server-{i}:443"));
     }
+    settings.remember_login("  lores://server-5:443  ");
+    settings.remember_login(" ");
+    assert_eq!(settings.login_urls.len(), 10);
+    assert_eq!(settings.login_urls[0], "lores://server-5:443");
+    assert_eq!(settings.login_urls.iter().filter(|url| *url == "lores://server-5:443").count(), 1);
+    settings.save(&path).unwrap();
+    let mut restarted = Settings::load(&path).unwrap();
+    assert_eq!(restarted.login_urls, settings.login_urls);
+    restarted.theme = "Light".into();
+    restarted.save(&path).unwrap();
+    assert_eq!(Settings::load(&path).unwrap().login_urls, settings.login_urls);
+    fs::write(&path, "{}").unwrap();
+    assert!(Settings::load(&path).unwrap().login_urls.is_empty());
+  }
 
-    #[test]
-    fn remembers_and_restores_across_reloads() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let path = root
-            .join("target/settings-test")
-            .join(format!("{}.json", std::process::id()));
-        let mut settings = Settings::default();
-        settings.remember(&root.join("src"));
-        settings.remember(&root);
-        settings.remember(&root.join("src"));
-        settings.cli = Some(root.join("한글 CLI.exe"));
-        settings.theme = "Light".into();
-        settings.language = "ko-KR".into();
-        settings.external_tool = "p4merge".into();
-        settings.tool_paths.insert("rider".into(), root.join("한글 tools/rider64.exe"));
-        settings.clone_url = "lores://example/repo".into();
-        settings.clone_destination = "C:/작업/repo".into();
-        settings.save(&path).unwrap();
-        settings.save(&path).unwrap();
-        let restored = Settings::load(&path).unwrap();
-        assert_eq!(restored.recent.len(), 2);
-        assert_eq!(restored.restore(), Some(root.join("src")));
-        assert_eq!(restored.cli, settings.cli);
-        assert_eq!(restored.theme, "Light");
-        assert_eq!(restored.language, "ko-KR");
-        assert_eq!(restored.external_tool, "p4merge");
-        assert_eq!(restored.tool_paths, settings.tool_paths);
-        assert_eq!(restored.clone_url, settings.clone_url);
-        assert_eq!(restored.clone_destination, settings.clone_destination);
+  #[test]
+  fn remembers_and_restores_across_reloads() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join("target/settings-test").join(format!("{}.json", std::process::id()));
+    let mut settings = Settings::default();
+    settings.remember(&root.join("src"));
+    settings.remember(&root);
+    settings.remember(&root.join("src"));
+    settings.cli = Some(root.join("한글 CLI.exe"));
+    settings.theme = "Light".into();
+    settings.language = "ko-KR".into();
+    settings.external_tool = "p4merge".into();
+    settings.tool_paths.insert("rider".into(), root.join("한글 tools/rider64.exe"));
+    settings.clone_url = "lores://example/repo".into();
+    settings.clone_destination = "C:/작업/repo".into();
+    settings.save(&path).unwrap();
+    settings.save(&path).unwrap();
+    let restored = Settings::load(&path).unwrap();
+    assert_eq!(restored.recent.len(), 2);
+    assert_eq!(restored.restore(), Some(root.join("src")));
+    assert_eq!(restored.cli, settings.cli);
+    assert_eq!(restored.theme, "Light");
+    assert_eq!(restored.language, "ko-KR");
+    assert_eq!(restored.external_tool, "p4merge");
+    assert_eq!(restored.tool_paths, settings.tool_paths);
+    assert_eq!(restored.clone_url, settings.clone_url);
+    assert_eq!(restored.clone_destination, settings.clone_destination);
+  }
+  #[test]
+  fn tool_locations_survive_restart_and_later_settings_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    let mut settings = Settings::default();
+    for tool in ["idea", "p4merge", "TortoiseGitMerge"] {
+      settings.tool_paths.insert(tool.into(), PathBuf::from(format!("C:/한글 Tools/{tool}.exe")));
     }
-    #[test]
-    fn tool_locations_survive_restart_and_later_settings_save() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        let mut settings = Settings::default();
-        for tool in ["idea", "p4merge", "TortoiseGitMerge"] {
-            settings.tool_paths.insert(tool.into(), PathBuf::from(format!("C:/한글 Tools/{tool}.exe")));
-        }
-        settings.external_tool = "rider".into();
-        settings.save(&path).unwrap();
-        let expected = settings.tool_paths.clone();
-        drop(settings);
-        let mut restarted = Settings::load(&path).unwrap();
-        assert_eq!(restarted.tool_paths, expected);
-        assert_eq!(restarted.external_tool, "rider");
-        restarted.theme = "Light".into();
-        restarted.save(&path).unwrap();
-        drop(restarted);
-        assert_eq!(Settings::load(&path).unwrap().tool_paths, expected);
-    }
-    #[test]
-    fn migrates_separate_tool_selections_to_shared_tool() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        fs::write(&path, r#"{"diff_tool":"rider","merge_tool":"p4merge"}"#).unwrap();
-        let settings = Settings::load(&path).unwrap();
-        assert_eq!(settings.external_tool, "rider");
-        settings.save(&path).unwrap();
-        assert_eq!(Settings::load(&path).unwrap().external_tool, "rider");
-        fs::write(&path, r#"{"merge_tool":"p4merge"}"#).unwrap();
-        assert_eq!(Settings::load(&path).unwrap().external_tool, "p4merge");
-    }
-    #[test]
-    #[cfg(windows)]
-    fn recent_paths_merge_extended_drive_and_unc_spellings() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        fs::write(&path, json!({"recent": [
-            r"C:\Lore", r"\\?\C:\Lore", r"c:/lore",
-            r"\\?\UNC\server\share\repo", r"\\server\share\repo",
-            r"C:\Other"
-        ]}).to_string()).unwrap();
-        let mut settings = Settings::load(&path).unwrap();
-        assert_eq!(settings.recent, vec![PathBuf::from(r"C:\Lore"),
-            PathBuf::from(r"\\server\share\repo"), PathBuf::from(r"C:\Other")]);
-        settings.remember(Path::new(r"\\?\C:\Other"));
-        assert_eq!(settings.recent[0], PathBuf::from(r"C:\Other"));
-        assert_eq!(settings.recent.len(), 3);
-        settings.save(&path).unwrap();
-        assert_eq!(Settings::load(&path).unwrap().recent, settings.recent);
-    }
+    settings.external_tool = "rider".into();
+    settings.save(&path).unwrap();
+    let expected = settings.tool_paths.clone();
+    drop(settings);
+    let mut restarted = Settings::load(&path).unwrap();
+    assert_eq!(restarted.tool_paths, expected);
+    assert_eq!(restarted.external_tool, "rider");
+    restarted.theme = "Light".into();
+    restarted.save(&path).unwrap();
+    drop(restarted);
+    assert_eq!(Settings::load(&path).unwrap().tool_paths, expected);
+  }
+  #[test]
+  fn migrates_separate_tool_selections_to_shared_tool() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    fs::write(&path, r#"{"diff_tool":"rider","merge_tool":"p4merge"}"#).unwrap();
+    let settings = Settings::load(&path).unwrap();
+    assert_eq!(settings.external_tool, "rider");
+    settings.save(&path).unwrap();
+    assert_eq!(Settings::load(&path).unwrap().external_tool, "rider");
+    fs::write(&path, r#"{"merge_tool":"p4merge"}"#).unwrap();
+    assert_eq!(Settings::load(&path).unwrap().external_tool, "p4merge");
+  }
+  #[test]
+  #[cfg(windows)]
+  fn recent_paths_merge_extended_drive_and_unc_spellings() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    fs::write(
+      &path,
+      json!({"recent": [
+          r"C:\Lore", r"\\?\C:\Lore", r"c:/lore",
+          r"\\?\UNC\server\share\repo", r"\\server\share\repo",
+          r"C:\Other"
+      ]})
+      .to_string(),
+    )
+    .unwrap();
+    let mut settings = Settings::load(&path).unwrap();
+    assert_eq!(settings.recent, vec![PathBuf::from(r"C:\Lore"), PathBuf::from(r"\\server\share\repo"), PathBuf::from(r"C:\Other")]);
+    settings.remember(Path::new(r"\\?\C:\Other"));
+    assert_eq!(settings.recent[0], PathBuf::from(r"C:\Other"));
+    assert_eq!(settings.recent.len(), 3);
+    settings.save(&path).unwrap();
+    assert_eq!(Settings::load(&path).unwrap().recent, settings.recent);
+  }
 
-    #[test]
-    fn bounds_history_and_skips_missing_directories() {
-        let mut settings = Settings::default();
-        settings.remember(Path::new(env!("CARGO_MANIFEST_DIR")));
-        settings.remember(Path::new("missing-lorelens-repository"));
-        assert_eq!(
-            settings.restore(),
-            Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
-        );
-        for i in 0..20 {
-            settings.remember(Path::new(&format!("repo-{i}")));
-        }
-        assert_eq!(settings.recent.len(), 10);
+  #[test]
+  fn bounds_history_and_skips_missing_directories() {
+    let mut settings = Settings::default();
+    settings.remember(Path::new(env!("CARGO_MANIFEST_DIR")));
+    settings.remember(Path::new("missing-lorelens-repository"));
+    assert_eq!(settings.restore(), Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))));
+    for i in 0..20 {
+      settings.remember(Path::new(&format!("repo-{i}")));
     }
+    assert_eq!(settings.recent.len(), 10);
+  }
 }
