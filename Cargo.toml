@@ -5,3 +5,6 @@ resolver = "3"
 
 [patch.crates-io]
 proc-macro-error2 = { path = "vendor/proc-macro-error2" }
+
+[profile.dev]
+debug = 0

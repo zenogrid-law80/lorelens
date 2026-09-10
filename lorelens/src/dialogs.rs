@@ -1,6 +1,110 @@
 use super::*;
 
 impl Lens {
+  pub(super) fn custom_tool_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if self.busy {
+      return;
+    }
+    let name = cx.new(|cx| TextInput::new("Application name", cx));
+    name.update(cx, |input, _| input.content = self.settings.custom_tool_name.clone().into());
+    let location = cx.new(|cx| TextInput::new("Application location", cx));
+    location.update(cx, |input, _| input.content = self.settings.custom_tool_path.to_string_lossy().into_owned().into());
+    let arguments = cx.new(|cx| TextInput::new("Arguments", cx));
+    arguments.update(cx, |input, _| input.content = self.settings.custom_tool_arguments.clone().into());
+    let presets = [
+      ("RustRover / IntelliJ", "idea", "merge {theirs} {yours} {base} {result}"),
+      ("P4Merge", "p4merge", "{base} {theirs} {yours} {result}"),
+      ("TortoiseGitMerge", "TortoiseGitMerge", "/base:{base} /mine:{yours} /theirs:{theirs} /merged:{result}"),
+      ("WinMerge", "WinMergeU", "/e /u /wl /wm /wr {base} {yours} {theirs} /o {result}"),
+    ];
+    let view = cx.entity().downgrade();
+    let validation = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+    window.open_dialog(cx, move |dialog, _, _| {
+      let name_input = name.clone();
+      let location_input = location.clone();
+      let arguments_input = arguments.clone();
+      let view = view.clone();
+      let validation = validation.clone();
+      let error = validation.borrow().clone();
+      dialog
+        .title(t("Custom diff / merge tool"))
+        .confirm()
+        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Save")))
+        .child(t("Application name"))
+        .child(name.clone())
+        .child(t("Application location"))
+        .child(location.clone())
+        .child(t("Arguments"))
+        .child(arguments.clone())
+        .child({
+          let (name, location, arguments) = (name.clone(), location.clone(), arguments.clone());
+          Button::new("custom-tool-preset").label(t("Tool preset…")).dropdown_menu(move |mut menu, _, _| {
+            for (label, tool, template) in presets {
+              let (name, location, arguments) = (name.clone(), location.clone(), arguments.clone());
+              let executable = external_tools::suggested_executable(tool).unwrap_or_default().to_string_lossy().into_owned();
+              menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
+                for (input, value) in [(&name, label), (&location, executable.as_str()), (&arguments, template)] {
+                  input.update(cx, |input, cx| {
+                    input.reset();
+                    input.content = value.to_string().into();
+                    cx.notify();
+                  });
+                }
+              }));
+            }
+            let (name, location, arguments) = (name.clone(), location.clone(), arguments.clone());
+            menu.separator().item(PopupMenuItem::new(t("Reset")).on_click(move |_, _, cx| {
+              for (input, value) in [(&name, "Custom"), (&location, ""), (&arguments, "{base} {yours}")] {
+                input.update(cx, |input, cx| {
+                  input.reset();
+                  input.content = value.into();
+                  cx.notify();
+                });
+              }
+            }))
+          })
+        })
+        .child(t("Placeholders: {base}, {theirs}, {yours}, {result}"))
+        .child(t(&error))
+        .on_ok(move |_, window, cx| {
+          let name = name_input.read(cx).content.trim().to_string();
+          let path = PathBuf::from(location_input.read(cx).content.trim());
+          let arguments = arguments_input.read(cx).content.trim().to_string();
+          if name.is_empty() || !path.is_absolute() || !external_tools::is_executable(&path) || arguments.is_empty() {
+            *validation.borrow_mut() = "Enter a name, an absolute executable path, and arguments.".into();
+            window.refresh();
+            return false;
+          }
+          if external_tools::arguments(
+            "custom",
+            Some(&arguments),
+            false,
+            std::path::Path::new("base"),
+            std::path::Path::new("theirs"),
+            std::path::Path::new("yours"),
+            std::path::Path::new("result"),
+          )
+          .is_err()
+          {
+            *validation.borrow_mut() = "Check the argument quotes and try again.".into();
+            window.refresh();
+            return false;
+          }
+          view
+            .update(cx, |this, cx| {
+              this.settings.custom_tool_name = name;
+              this.settings.custom_tool_path = canonicalize_path(path);
+              this.settings.custom_tool_arguments = arguments;
+              this.settings.external_tool = "custom".into();
+              let saved = this.save_settings();
+              cx.notify();
+              saved
+            })
+            .unwrap_or(false)
+        })
+    });
+  }
+
   pub(super) fn local_commits_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     if self.busy || !self.connected {
       return;

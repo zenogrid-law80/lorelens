@@ -21,6 +21,9 @@ pub struct Settings {
   pub language: String,
   pub external_tool: String,
   pub tool_paths: std::collections::BTreeMap<String, PathBuf>,
+  pub custom_tool_name: String,
+  pub custom_tool_path: PathBuf,
+  pub custom_tool_arguments: String,
   pub identity: Option<String>,
   pub create_url: String,
   pub create_destination: String,
@@ -45,6 +48,9 @@ impl Default for Settings {
       language: "en-US".into(),
       external_tool: "idea".into(),
       tool_paths: Default::default(),
+      custom_tool_name: "Custom".into(),
+      custom_tool_path: PathBuf::new(),
+      custom_tool_arguments: "{base} {yours}".into(),
       identity: None,
       create_url: String::new(),
       create_destination: String::new(),
@@ -102,7 +108,8 @@ impl Settings {
       .filter_map(|bookmark| {
         let root = Self::normalize_recent_path(&bookmark.root);
         let path = bookmark.path;
-        (!path.as_os_str().is_empty() && !path.is_absolute()).then_some(Bookmark { root, path })
+        let safe = !path.as_os_str().is_empty() && !path.is_absolute() && path.components().all(|component| matches!(component, std::path::Component::Normal(_)));
+        safe.then_some(Bookmark { root, path })
       })
       .filter(|bookmark| seen.insert((Self::recent_key(&bookmark.root), Self::recent_key(&bookmark.path))))
       .collect()
@@ -174,6 +181,9 @@ impl Settings {
         .unwrap_or("idea")
         .into(),
       tool_paths: serde_json::from_value(data.get("tool_paths").cloned().unwrap_or(json!({})))?,
+      custom_tool_name: data["custom_tool_name"].as_str().unwrap_or("Custom").into(),
+      custom_tool_path: serde_json::from_value(data.get("custom_tool_path").cloned().unwrap_or(json!("")))?,
+      custom_tool_arguments: data["custom_tool_arguments"].as_str().unwrap_or("{base} {yours}").into(),
       identity: data["identity"].as_str().filter(|id| !id.is_empty()).map(str::to_string),
       create_url: data["create_url"].as_str().unwrap_or_default().into(),
       create_destination: data["create_destination"].as_str().unwrap_or_default().into(),
@@ -298,7 +308,7 @@ impl Settings {
       .collect();
     serde_json::to_writer_pretty(
       &mut file,
-      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "recent": Self::normalized_recent(self.recent.clone()), "bookmarks": bookmarks, "cli": self.cli, "theme": self.theme, "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
+      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "custom_tool_name": self.custom_tool_name, "custom_tool_path": self.custom_tool_path, "custom_tool_arguments": self.custom_tool_arguments, "recent": Self::normalized_recent(self.recent.clone()), "bookmarks": bookmarks, "cli": self.cli, "theme": self.theme, "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
     )?;
     file.sync_all()?;
     drop(file);
@@ -376,6 +386,37 @@ mod tests {
   }
 
   #[test]
+  fn bookmarks_reject_paths_that_escape_the_repository() {
+    let root = tempfile::tempdir().unwrap();
+    let settings = Settings {
+      bookmarks: vec![
+        Bookmark {
+          root: root.path().into(),
+          path: PathBuf::from("../outside.txt"),
+        },
+        Bookmark {
+          root: root.path().into(),
+          path: PathBuf::from("folder/../../outside.txt"),
+        },
+        Bookmark {
+          root: root.path().into(),
+          path: PathBuf::from("folder/file.txt"),
+        },
+      ],
+      ..Settings::default()
+    };
+
+    let normalized = Settings::normalized_bookmarks(settings.bookmarks);
+    assert_eq!(
+      normalized,
+      vec![Bookmark {
+        root: root.path().into(),
+        path: PathBuf::from("folder/file.txt")
+      }]
+    );
+  }
+
+  #[test]
   fn migrates_old_history_shortcut_away_from_command_window_shortcut() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("settings.json");
@@ -442,6 +483,9 @@ mod tests {
     settings.language = "ko-KR".into();
     settings.external_tool = "p4merge".into();
     settings.tool_paths.insert("rider".into(), root.join("한글 tools/rider64.exe"));
+    settings.custom_tool_name = "My Merge".into();
+    settings.custom_tool_path = root.join("tools/custom.exe");
+    settings.custom_tool_arguments = "--wait {base} {yours}".into();
     settings.clone_url = "lores://example/repo".into();
     settings.clone_destination = "C:/작업/repo".into();
     settings.save(&path).unwrap();
@@ -454,6 +498,9 @@ mod tests {
     assert_eq!(restored.language, "ko-KR");
     assert_eq!(restored.external_tool, "p4merge");
     assert_eq!(restored.tool_paths, settings.tool_paths);
+    assert_eq!(restored.custom_tool_name, settings.custom_tool_name);
+    assert_eq!(restored.custom_tool_path, settings.custom_tool_path);
+    assert_eq!(restored.custom_tool_arguments, settings.custom_tool_arguments);
     assert_eq!(restored.clone_url, settings.clone_url);
     assert_eq!(restored.clone_destination, settings.clone_destination);
   }

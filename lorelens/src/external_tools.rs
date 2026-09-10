@@ -5,7 +5,13 @@ use std::{
   process::{Command, Stdio},
 };
 
-pub const TOOLS: [&str; 3] = ["idea", "p4merge", "TortoiseGitMerge"];
+pub const TOOLS: [&str; 4] = ["idea", "p4merge", "TortoiseGitMerge", "WinMergeU"];
+
+pub struct Tool<'a> {
+  pub name: &'a str,
+  pub custom_arguments: Option<&'a str>,
+  pub executable: &'a Path,
+}
 
 pub fn is_executable(path: &Path) -> bool {
   if !path.is_file() {
@@ -30,17 +36,72 @@ pub fn resolve(tool: &str, configured: Option<&std::path::PathBuf>) -> Option<st
   if let Some(path) = configured {
     return (path.is_absolute() && is_executable(path)).then(|| path.clone());
   }
-  let paths = std::env::var_os("PATH")?;
-  std::env::split_paths(&paths).filter(|dir| dir.is_absolute()).find_map(|dir| {
-    #[cfg(windows)]
-    let names = [format!("{tool}.exe"), format!("{tool}.com")];
-    #[cfg(not(windows))]
-    let names = [tool.to_string()];
-    names.into_iter().map(|name| dir.join(name)).find(|path| is_executable(path))
+  let from_path = std::env::var_os("PATH").and_then(|paths| std::env::split_paths(&paths).filter(|dir| dir.is_absolute()).find_map(|dir| executable_in(&dir, tool)));
+  from_path.or_else(|| default_install_dirs(tool).into_iter().find_map(|dir| executable_in(&dir, tool)))
+}
+
+fn executable_in(dir: &Path, tool: &str) -> Option<std::path::PathBuf> {
+  #[cfg(windows)]
+  let names = [format!("{tool}.exe"), format!("{tool}.com")];
+  #[cfg(not(windows))]
+  let names = [tool.to_string()];
+  names.into_iter().map(|name| dir.join(name)).find(|path| is_executable(path))
+}
+
+#[cfg(windows)]
+fn default_install_dirs(tool: &str) -> Vec<std::path::PathBuf> {
+  let location = match tool.to_ascii_lowercase().as_str() {
+    "idea" => ("LOCALAPPDATA", "Programs/RustRover/bin"),
+    "winmergeu" => ("LOCALAPPDATA", "Programs/WinMerge"),
+    "p4merge" => ("ProgramFiles", "Perforce"),
+    "tortoisegitmerge" => ("ProgramFiles", "TortoiseGit/bin"),
+    _ => return Vec::new(),
+  };
+  std::env::var_os(location.0).map(|root| vec![std::path::PathBuf::from(root).join(location.1)]).unwrap_or_default()
+}
+
+#[cfg(not(windows))]
+fn default_install_dirs(_tool: &str) -> Vec<std::path::PathBuf> {
+  Vec::new()
+}
+
+pub fn suggested_executable(tool: &str) -> Option<std::path::PathBuf> {
+  resolve(tool, None).or_else(|| {
+    default_install_dirs(tool).into_iter().next().map(|dir| {
+      #[cfg(windows)]
+      return dir.join(format!("{tool}.exe"));
+      #[cfg(not(windows))]
+      return dir.join(tool);
+    })
   })
 }
 
-pub fn arguments(tool: &str, merge: bool, base: &Path, theirs: &Path, yours: &Path, result: &Path) -> Result<Vec<OsString>, String> {
+fn split_arguments(template: &str) -> Result<Vec<String>, String> {
+  let mut arguments = Vec::new();
+  let mut current = String::new();
+  let mut quote = None;
+  for character in template.chars() {
+    match (quote, character) {
+      (Some(expected), value) if value == expected => quote = None,
+      (None, '"' | '\'') => quote = Some(character),
+      (None, value) if value.is_whitespace() => {
+        if !current.is_empty() {
+          arguments.push(std::mem::take(&mut current));
+        }
+      }
+      _ => current.push(character),
+    }
+  }
+  if quote.is_some() {
+    return Err("Custom arguments contain an unclosed quote.".into());
+  }
+  if !current.is_empty() {
+    arguments.push(current);
+  }
+  Ok(arguments)
+}
+
+pub fn arguments(tool: &str, custom: Option<&str>, merge: bool, base: &Path, theirs: &Path, yours: &Path, result: &Path) -> Result<Vec<OsString>, String> {
   let path = |p: &Path| p.as_os_str().to_owned();
   Ok(match tool {
     "idea" if merge => vec!["merge".into(), path(theirs), path(yours), path(base), path(result)],
@@ -54,11 +115,34 @@ pub fn arguments(tool: &str, merge: bool, base: &Path, theirs: &Path, yours: &Pa
         arg
       })
       .collect(),
+    "WinMergeU" if merge => vec![
+      "/e".into(),
+      "/u".into(),
+      "/wl".into(),
+      "/wm".into(),
+      "/wr".into(),
+      path(base),
+      path(yours),
+      path(theirs),
+      "/o".into(),
+      path(result),
+    ],
+    "WinMergeU" => vec!["/e".into(), "/u".into(), path(base), path(yours)],
+    "custom" => split_arguments(custom.unwrap_or_default())?
+      .into_iter()
+      .map(|argument| match argument.as_str() {
+        "{base}" => path(base),
+        "{theirs}" => path(theirs),
+        "{yours}" => path(yours),
+        "{result}" => path(result),
+        _ => argument.into(),
+      })
+      .collect(),
     _ => return Err(format!("Unknown external tool: {tool}")),
   })
 }
 
-pub fn diff(cli: &Path, root: &Path, relative: &str, revision: &str, identity: Option<&str>, tool: &str, executable: &Path) -> Result<(), String> {
+pub fn diff(cli: &Path, root: &Path, relative: &str, revision: &str, identity: Option<&str>, tool: Tool<'_>) -> Result<(), String> {
   let temporary = tempfile::Builder::new().prefix("lorelens-diff-").tempdir().map_err(|e| e.to_string())?;
   let name = Path::new(relative).file_name().ok_or("Select a file to compare")?;
   let file = |side: &str| -> Result<std::path::PathBuf, String> {
@@ -94,10 +178,10 @@ pub fn diff(cli: &Path, root: &Path, relative: &str, revision: &str, identity: O
     fs::write(&yours, []).map_err(|e| e.to_string())?;
   }
   fs::copy(&yours, &result).map_err(|e| e.to_string())?;
-  let mut command = Command::new(executable);
+  let mut command = Command::new(tool.executable);
   command
     .current_dir(root)
-    .args(arguments(tool, false, &base, &theirs, &yours, &result)?)
+    .args(arguments(tool.name, tool.custom_arguments, false, &base, &theirs, &yours, &result)?)
     .stdin(Stdio::null())
     .stdout(Stdio::null())
     .stderr(Stdio::null());
@@ -108,7 +192,7 @@ pub fn diff(cli: &Path, root: &Path, relative: &str, revision: &str, identity: O
   }
   let mut child = command
     .spawn()
-    .map_err(|e| format!("Cannot start {tool}: {e}. Choose its executable using Locate executable in the tools menu."))?;
+    .map_err(|e| format!("Cannot start {}: {e}. Choose its executable using Locate executable in the tools menu.", tool.name))?;
   // IDE launchers can exit before an existing IDE opens the files. Retain snapshots.
   let _ = temporary.keep();
   std::thread::spawn(move || {
@@ -117,7 +201,7 @@ pub fn diff(cli: &Path, root: &Path, relative: &str, revision: &str, identity: O
   Ok(())
 }
 
-pub fn merge(root: &Path, relative: &str, tool: &str, executable: &Path) -> Result<(), String> {
+pub fn merge(root: &Path, relative: &str, tool: Tool<'_>) -> Result<(), String> {
   let root = root.canonicalize().map_err(|e| e.to_string())?;
   let result = root.join(relative);
   let side = |suffix: &str| {
@@ -135,10 +219,10 @@ pub fn merge(root: &Path, relative: &str, tool: &str, executable: &Path) -> Resu
       return Err(crate::i18n::t("Merge inputs must be files inside the repository."));
     }
   }
-  let mut command = Command::new(executable);
+  let mut command = Command::new(tool.executable);
   command
     .current_dir(&root)
-    .args(arguments(tool, true, &base, &theirs, &mine, &result)?)
+    .args(arguments(tool.name, tool.custom_arguments, true, &base, &theirs, &mine, &result)?)
     .stdin(Stdio::null())
     .stdout(Stdio::null())
     .stderr(Stdio::null());
@@ -177,16 +261,25 @@ mod tests {
     let y = Path::new("local file.txt");
     let r = Path::new("result.txt");
     for tool in ["idea"] {
-      assert_eq!(arguments(tool, false, b, t, y, r).unwrap(), vec![OsString::from("diff"), b.into(), y.into()]);
-      assert_eq!(arguments(tool, true, b, t, y, r).unwrap(), vec![OsString::from("merge"), t.into(), y.into(), b.into(), r.into()]);
+      assert_eq!(arguments(tool, None, false, b, t, y, r).unwrap(), vec![OsString::from("diff"), b.into(), y.into()]);
+      assert_eq!(arguments(tool, None, true, b, t, y, r).unwrap(), vec![OsString::from("merge"), t.into(), y.into(), b.into(), r.into()]);
     }
     for merge in [false, true] {
-      assert_eq!(arguments("p4merge", merge, b, t, y, r).unwrap(), vec![b.as_os_str(), t.as_os_str(), y.as_os_str(), r.as_os_str()]);
+      assert_eq!(arguments("p4merge", None, merge, b, t, y, r).unwrap(), vec![b.as_os_str(), t.as_os_str(), y.as_os_str(), r.as_os_str()]);
       assert_eq!(
-        arguments("TortoiseGitMerge", merge, b, t, y, r).unwrap(),
+        arguments("TortoiseGitMerge", None, merge, b, t, y, r).unwrap(),
         vec!["/base:base 한글.txt", "/mine:local file.txt", "/theirs:theirs.txt", "/merged:result.txt"]
       );
     }
-    assert!(arguments("unknown", false, b, t, y, r).is_err());
+    assert_eq!(arguments("WinMergeU", None, false, b, t, y, r).unwrap(), vec!["/e", "/u", "base 한글.txt", "local file.txt"]);
+    assert_eq!(
+      arguments("WinMergeU", None, true, b, t, y, r).unwrap(),
+      vec!["/e", "/u", "/wl", "/wm", "/wr", "base 한글.txt", "local file.txt", "theirs.txt", "/o", "result.txt"]
+    );
+    assert_eq!(
+      arguments("custom", Some("--wait \"{base}\" '{yours}' {result}"), false, b, t, y, r).unwrap(),
+      vec!["--wait", "base 한글.txt", "local file.txt", "result.txt"]
+    );
+    assert!(arguments("unknown", None, false, b, t, y, r).is_err());
   }
 }

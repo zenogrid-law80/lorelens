@@ -173,7 +173,11 @@ impl Lens {
                 this.notice = "Select a valid executable file (.exe or .com on Windows).".into();
                 this.error = true;
               } else {
-                this.settings.tool_paths.insert(tool.clone(), path.clone());
+                if tool == "custom" {
+                  this.settings.custom_tool_path = path.clone();
+                } else {
+                  this.settings.tool_paths.insert(tool.clone(), path.clone());
+                }
                 if !this.save_settings() {
                   cx.notify();
                   return;
@@ -214,7 +218,14 @@ impl Lens {
     let merge_root = root.clone();
     let merge_branch = self.status.branch.clone();
     let tool = self.settings.external_tool.clone();
-    let Some(executable) = external_tools::resolve(&tool, self.settings.tool_paths.get(&tool)) else {
+    let custom_arguments = (tool == "custom").then(|| self.settings.custom_tool_arguments.clone());
+    let configured = if tool == "custom" {
+      Some(&self.settings.custom_tool_path)
+    } else {
+      self.settings.tool_paths.get(&tool)
+    };
+    let display_name = if tool == "custom" { self.settings.custom_tool_name.clone() } else { tool.clone() };
+    let Some(executable) = external_tools::resolve(&tool, configured) else {
       self.choose_tool(tool, Some((root, path)), cx);
       return;
     };
@@ -222,13 +233,32 @@ impl Lens {
     self.busy = true;
     self.notice = tf(
       if merge { "Opening {tool} merge for {path}…" } else { "Opening {tool} diff for {path}…" },
-      &[("tool", tool.to_string()), ("path", path.to_string())],
+      &[("tool", display_name), ("path", path.to_string())],
     );
     let task = cx.background_executor().spawn(async move {
       if merge {
-        return external_tools::merge(&root, &path, &tool, &executable);
+        return external_tools::merge(
+          &root,
+          &path,
+          external_tools::Tool {
+            name: &tool,
+            custom_arguments: custom_arguments.as_deref(),
+            executable: &executable,
+          },
+        );
       }
-      external_tools::diff(&cli, &root, &path, &revision, identity.as_deref(), &tool, &executable)
+      external_tools::diff(
+        &cli,
+        &root,
+        &path,
+        &revision,
+        identity.as_deref(),
+        external_tools::Tool {
+          name: &tool,
+          custom_arguments: custom_arguments.as_deref(),
+          executable: &executable,
+        },
+      )
     });
     cx.spawn(async move |this, cx| {
       let result = task.await;
@@ -447,7 +477,8 @@ impl Lens {
     if self.busy || !path.starts_with(&self.root) || path == self.root {
       return;
     }
-    if !path.exists() {
+    let accessible = path.canonicalize().ok().zip(self.root.canonicalize().ok()).is_some_and(|(path, root)| path.starts_with(root));
+    if !accessible {
       self.settings.prune_bookmarks();
       self.save_settings();
       self.error = true;

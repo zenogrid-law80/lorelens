@@ -229,12 +229,14 @@ impl Lens {
   pub(super) fn options_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let view = cx.entity().downgrade();
     let selected = self.settings.external_tool.clone();
+    let selected_label = if selected == "custom" { self.settings.custom_tool_name.clone() } else { selected.clone() };
+    let custom_selected = selected == "custom";
     let obliterate_enabled = self.obliterate_enabled;
     let ready = !self.busy;
     Button::new("options-menu").label(format!("{} ▾", t("Options"))).dropdown_menu(move |menu, window, cx| {
       let selection_view = view.clone();
       let current = selected.clone();
-      let menu = menu.submenu(tf("Diff / Merge: {selected}", &[("selected", selected.to_string())]), window, cx, move |mut menu, _, _| {
+      let menu = menu.submenu(tf("Diff / Merge: {selected}", &[("selected", selected_label.clone())]), window, cx, move |mut menu, _, _| {
         for tool in external_tools::TOOLS {
           let view = selection_view.clone();
           menu = menu.item(PopupMenuItem::new(if tool == current { format!("✓ {tool}") } else { tool.into() }).on_click(move |_, _, cx| {
@@ -248,6 +250,10 @@ impl Lens {
             });
           }));
         }
+        let custom_view = selection_view.clone();
+        menu = menu.separator().item(PopupMenuItem::new(t("Custom tool…")).on_click(move |_, window, cx| {
+          let _ = custom_view.update(cx, |this, cx| this.custom_tool_dialog(window, cx));
+        }));
         menu
       });
       let cli_view = view.clone();
@@ -266,7 +272,7 @@ impl Lens {
             this.choose_tool(tool, None, cx);
           });
         }))
-        .item(PopupMenuItem::new(t("Use PATH")).on_click(move |_, _, cx| {
+        .item(PopupMenuItem::new(t("Use PATH")).disabled(custom_selected).on_click(move |_, _, cx| {
           let _ = path_view.update(cx, |this, cx| {
             let tool = this.settings.external_tool.clone();
             this.settings.tool_paths.remove(&tool);

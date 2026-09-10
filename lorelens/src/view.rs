@@ -357,12 +357,20 @@ impl Render for Lens {
             .gap_2()
             .child(
               div()
+                .id("lorelens-home-link")
                 .text_size(px(13.))
                 .px_2()
                 .flex()
                 .items_center()
                 .gap_2()
                 .font_weight(FontWeight::SEMIBOLD)
+                .cursor_pointer()
+                .on_mouse_down(MouseButton::Left, |event, _, cx| {
+                  cx.stop_propagation();
+                  if event.click_count == 2 {
+                    cx.open_url("https://lorelens.zenogrid.co.kr/");
+                  }
+                })
                 .child(gpui::img(crate::file_browser::favicon_image()).w(px(20.)).h(px(20.)).flex_shrink_0())
                 .child("LoreLens"),
             )
