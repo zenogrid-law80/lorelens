@@ -97,15 +97,22 @@ impl Lens {
       self.silent_refresh = silent && self.busy;
       return;
     }
-    self.command(vec!["status".into(), "--scan".into()], "Repository status", true, false, cx);
-    self.silent_refresh = silent && self.busy;
+    self.command_with_mode(vec!["status".into(), "--scan".into()], "Repository status", true, false, silent, cx);
   }
 
   pub(super) fn command(&mut self, args: Vec<String>, title: &str, status: bool, mutation: bool, cx: &mut Context<Self>) {
-    self.command_batch(vec![args], title, status, mutation, cx);
+    self.command_batch_with_mode(vec![args], title, status, mutation, false, cx);
   }
 
   pub(super) fn command_batch(&mut self, commands: Vec<Vec<String>>, title: &str, status: bool, mutation: bool, cx: &mut Context<Self>) {
+    self.command_batch_with_mode(commands, title, status, mutation, false, cx);
+  }
+
+  fn command_with_mode(&mut self, args: Vec<String>, title: &str, status: bool, mutation: bool, silent: bool, cx: &mut Context<Self>) {
+    self.command_batch_with_mode(vec![args], title, status, mutation, silent, cx);
+  }
+
+  fn command_batch_with_mode(&mut self, commands: Vec<Vec<String>>, title: &str, status: bool, mutation: bool, silent: bool, cx: &mut Context<Self>) {
     let Some(args) = commands.first().cloned() else {
       return;
     };
@@ -120,10 +127,12 @@ impl Lens {
     }
     self.preview.invalidate();
     self.busy = true;
-    self.silent_refresh = false;
+    self.silent_refresh = silent;
     self.error = false;
-    self.notice = tf("Running {command}…", &[("command", args.join(" "))]);
-    self.log(format!("lore {}", args.join(" ")));
+    if !silent {
+      self.notice = tf("Running {command}…", &[("command", args.join(" "))]);
+      self.log(format!("lore {}", args.join(" ")));
+    }
     let root = self.root.clone();
     let cli = self.cli.clone();
     let expanded = self.expanded_folders.clone();
@@ -217,13 +226,15 @@ impl Lens {
           this.locked_paths.clear();
           match locks {
             Ok(paths) => this.locked_paths = paths,
-            Err(error) => this.log(format!("File lock indicators unavailable: {error}")),
+            Err(error) if !silent_refresh => this.log(format!("File lock indicators unavailable: {error}")),
+            Err(_) => {}
           }
         }
         if let Some(entries) = entries {
           match entries {
             Ok(entries) => this.entries = entries,
-            Err(error) => this.log(format!("Folder refresh failed: {error}")),
+            Err(error) if !silent_refresh => this.log(format!("Folder refresh failed: {error}")),
+            Err(_) => {}
           }
         }
         match result {
@@ -233,7 +244,9 @@ impl Lens {
                 Ok(state) => {
                   this.status = state;
                   this.connected = true;
-                  this.notice = tf("Status refreshed · {count} pending files", &[("count", this.status.changes.len().to_string())]);
+                  if !silent_refresh {
+                    this.notice = tf("Status refreshed · {count} pending files", &[("count", this.status.changes.len().to_string())]);
+                  }
                 }
                 Err(e) => {
                   this.connected = false;
@@ -269,9 +282,10 @@ impl Lens {
               this.remote_branches.sort();
               this.remote_branches.dedup();
               this.branch_output = lines.join("\n");
-              this.notice = "Branches loaded".into();
-              this.command(vec!["auth".into(), "info".into()], "Account", false, false, cx);
-              this.silent_refresh = silent_refresh && this.busy;
+              if !silent_refresh {
+                this.notice = "Branches loaded".into();
+              }
+              this.command_with_mode(vec!["auth".into(), "info".into()], "Account", false, false, silent_refresh, cx);
             } else if kind == CommandKind::Logout {
               this.settings.identity = None;
               this.settings.login_remote = None;
@@ -312,13 +326,14 @@ impl Lens {
               this.output_title = title.clone();
               this.notice = tf("{title} completed", &[("title", t(&title))]);
             }
-            this.log(this.notice.clone());
+            if !silent_refresh {
+              this.log(this.notice.clone());
+            }
             if kind == CommandKind::Login && backend::is_repository(&this.root) {
               this.refresh(cx);
             }
             if status && this.connected {
-              this.command(vec!["branch".into(), "list".into()], "Branches", false, false, cx);
-              this.silent_refresh = silent_refresh && this.busy;
+              this.command_with_mode(vec!["branch".into(), "list".into()], "Branches", false, false, silent_refresh, cx);
             }
             if mutation {
               if kind.changes_worktree() {

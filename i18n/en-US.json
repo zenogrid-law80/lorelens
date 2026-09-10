@@ -11,7 +11,6 @@
   "{count} files staged": "{count} files staged",
   "Stage files to commit your changes.": "Stage files to commit your changes.",
   "Auto refresh (30s)": "Auto refresh (30s)",
-  "Refresh ({seconds}s)": "Refresh ({seconds}s)",
   "Keyboard shortcuts": "Keyboard shortcuts",
   "Options": "Options",
   "Line endings: {selected}": "Line endings: {selected}",

@@ -376,9 +376,6 @@ impl Lens {
             } else if !this.busy && std::time::Instant::now() >= this.next_refresh {
               this.refresh_with_mode(true, cx);
             }
-            if this.connected && this.settings.auto_refresh {
-              cx.notify();
-            }
           })
           .is_err()
         {

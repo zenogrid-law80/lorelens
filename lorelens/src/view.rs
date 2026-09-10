@@ -509,16 +509,7 @@ impl Render for Lens {
           .border_color(rgb(BORDER))
           .child(self.app_menu("Repository", true, cx))
           .child(self.branch_menu(vcs, cx))
-          .child(
-            self
-              .button("refresh", "Refresh", ready)
-              .h(px(36.))
-              .when(self.connected && self.settings.auto_refresh, |button| {
-                let seconds = self.next_refresh.saturating_duration_since(std::time::Instant::now()).as_secs_f64().ceil() as u64;
-                button.label(tf("Refresh ({seconds}s)", &[("seconds", seconds.to_string())]))
-              })
-              .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
-          )
+          .child(self.button("refresh", "Refresh", ready).h(px(36.)).on_click(cx.listener(|this, _, _, cx| this.refresh(cx))))
           .child(self.button("sync", "Sync", vcs).h(px(36.)).label(sync_label).on_click(cx.listener(|this, _, _, cx| {
             if !this.busy && this.connected {
               this.command(vec!["sync".into()], "Sync", false, true, cx);
@@ -588,7 +579,7 @@ impl Render for Lens {
           .bg(rgb(Surface))
           .text_size(px(11.))
           .text_color(rgb(if self.error { Danger } else { MUTED }))
-          .child(div().size(px(10.)).flex_shrink_0().rounded_full().bg(rgb(if self.busy {
+          .child(div().size(px(10.)).flex_shrink_0().rounded_full().bg(rgb(if self.busy && !self.silent_refresh {
             Warning
           } else if self.error {
             Danger
