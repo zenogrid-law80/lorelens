@@ -187,7 +187,7 @@ impl Render for Lens {
           .flex_1()
           .min_h_0()
           .overflow_scroll()
-          .font_family("Consolas")
+          .font_family(gpui_component::Theme::global(cx).mono_font_family.clone())
           .text_size(px(12.))
           .p_3()
           .children(lines),
@@ -361,7 +361,7 @@ impl Render for Lens {
       .flex_col()
       .bg(rgb(BG))
       .text_color(rgb(TEXT))
-      .font_family("Segoe UI")
+      .font_family(gpui_component::Theme::global(cx).font_family.clone())
       .text_size(px(13.))
       .child(
         TitleBar::new().bg(rgb(PANEL)).border_color(rgb(BORDER)).child(

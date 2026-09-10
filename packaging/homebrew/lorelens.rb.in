@@ -1,0 +1,16 @@
+# Submission template: replace the checksum after publishing the signed DMG.
+# Confirm the minimum macOS version against BOTH executables in that release.
+cask "lorelens" do
+  version "0.1.2"
+  sha256 "REPLACE_WITH_PUBLISHED_DMG_SHA256"
+
+  url "https://github.com/zenogrid-law80/lorelens/releases/download/v#{version}/LoreLens-#{version}-macos-arm64.dmg"
+  name "LoreLens"
+  desc "Desktop client for Lore version control"
+  homepage "https://github.com/zenogrid-law80/lorelens"
+
+  depends_on arch: :arm64
+  depends_on macos: ">= :big_sur"
+
+  app "LoreLens.app"
+end

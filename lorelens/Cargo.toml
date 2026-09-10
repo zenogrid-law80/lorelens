@@ -7,7 +7,8 @@ license = "MIT"
 
 [dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.4" }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.4" }
+# macOS requires font-kit; without it GPUI uses a text system that renders no glyphs.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.4", features = ["font-kit"] }
 gpui-component = "=0.6.1"
 gpui-kit-assets = "=0.6.1"
 serde_json = "1"

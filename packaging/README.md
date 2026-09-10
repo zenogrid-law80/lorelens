@@ -1,5 +1,7 @@
 # macOS 앱 만들기
 
+Homebrew Cask 제출 준비와 배포 전제 조건은 [homebrew/README.md](homebrew/README.md)를 참고하세요.
+
 macOS에서 Xcode와 Metal Toolchain 설치 후 프로젝트 루트에서 실행합니다.
 
 ```bash
