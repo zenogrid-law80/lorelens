@@ -1,6 +1,57 @@
 use super::*;
 
 impl Lens {
+  pub(super) fn bookmark_toggle(&self, cx: &mut Context<Self>) -> Button {
+    let view = cx.entity().downgrade();
+    let path = self.selection.current.as_ref().map(|path| self.root.join(path));
+    let root = self.root.clone();
+    let bookmarked = path.as_ref().is_some_and(|path| self.settings.is_bookmarked(&root, path));
+    Button::new("bookmark-toggle")
+      .label(if bookmarked { "★" } else { "☆" })
+      .small()
+      .disabled(self.busy || path.is_none())
+      .on_click(move |_, _, cx| {
+        let Some(path) = path.clone() else {
+          return;
+        };
+        let _ = view.update(cx, |this, cx| {
+          let added = this.settings.toggle_bookmark(&root, &path);
+          if this.save_settings() {
+            this.error = false;
+            this.notice = tf(if added { "Bookmark added: {path}" } else { "Bookmark removed: {path}" }, &[("path", path.display().to_string())]);
+          }
+          cx.notify();
+        });
+      })
+  }
+
+  pub(super) fn bookmark_list(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    let view = cx.entity().downgrade();
+    Button::new("bookmark-list").label("▾").small().dropdown_menu(move |mut menu, _, cx| {
+      let (bookmarks, root, ready) = view
+        .update(cx, |this, cx| {
+          if this.settings.prune_bookmarks() {
+            this.save_settings();
+            cx.notify();
+          }
+          (this.settings.bookmarks_for(&this.root), this.root.clone(), !this.busy)
+        })
+        .unwrap_or_default();
+      for path in &bookmarks {
+        let bookmark_view = view.clone();
+        let target = root.join(path);
+        let label = path.display().to_string();
+        menu = menu.item(PopupMenuItem::new(label).disabled(!ready).on_click(move |_, _, cx| {
+          let _ = bookmark_view.update(cx, |this, cx| this.open_bookmark(target.clone(), cx));
+        }));
+      }
+      if bookmarks.is_empty() {
+        menu = menu.label(t("No bookmarks"));
+      }
+      menu
+    })
+  }
+
   pub(super) fn app_menu(&self, kind: &'static str, toolbar: bool, cx: &mut Context<Self>) -> impl IntoElement {
     let view = cx.entity().downgrade();
     let ready = !self.busy;
@@ -102,6 +153,30 @@ impl Lens {
         });
       }
       if kind == "Repository" {
+        let (bookmarks, root) = view
+          .update(cx, |this, cx| {
+            if this.settings.prune_bookmarks() {
+              this.save_settings();
+              cx.notify();
+            }
+            (this.settings.bookmarks_for(&this.root), this.root.clone())
+          })
+          .unwrap_or_default();
+        let bookmark_view = view.clone();
+        menu = menu.separator().submenu(t("Bookmarks"), window, cx, move |mut menu, _, _| {
+          for path in &bookmarks {
+            let view = bookmark_view.clone();
+            let target = root.join(path);
+            let label = path.display().to_string();
+            menu = menu.item(PopupMenuItem::new(label).disabled(!ready).on_click(move |_, _, cx| {
+              let _ = view.update(cx, |this, cx| this.open_bookmark(target.clone(), cx));
+            }));
+          }
+          if bookmarks.is_empty() {
+            menu = menu.label(t("No bookmarks"));
+          }
+          menu
+        });
         let recent = view
           .update(cx, |this, cx| {
             if this.settings.prune_recent() {
@@ -145,56 +220,6 @@ impl Lens {
         menu = menu.separator().label(tf("Signed in: {account}", &[("account", t(&account))]));
       }
       menu
-    })
-  }
-
-  pub(super) fn tool_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let view = cx.entity().downgrade();
-    let selected = self.settings.external_tool.clone();
-    Button::new("tools-menu").label(t("Tools ▾")).dropdown_menu(move |menu, window, cx| {
-      let selection_view = view.clone();
-      let current = selected.clone();
-      let menu = menu.submenu(tf("Diff / Merge: {selected}", &[("selected", selected.to_string())]), window, cx, move |mut menu, _, _| {
-        for tool in external_tools::TOOLS {
-          let view = selection_view.clone();
-          menu = menu.item(PopupMenuItem::new(if tool == current { format!("✓ {tool}") } else { tool.into() }).on_click(move |_, _, cx| {
-            let _ = view.update(cx, |this, cx| {
-              this.settings.external_tool = tool.into();
-              this.save_settings();
-              if external_tools::resolve(tool, this.settings.tool_paths.get(tool)).is_none() {
-                this.choose_tool(tool.into(), None, cx);
-              }
-              cx.notify();
-            });
-          }));
-        }
-        menu
-      });
-      let cli_view = view.clone();
-      let menu = menu.item(PopupMenuItem::new(t("Locate Lore CLI…")).on_click(move |_, _, cx| {
-        let _ = cli_view.update(cx, |this, cx| this.choose(true, cx));
-      }));
-      let locate_view = view.clone();
-      let path_view = view.clone();
-      menu
-        .separator()
-        .item(PopupMenuItem::new(t("Locate executable…")).on_click(move |_, _, cx| {
-          let _ = locate_view.update(cx, |this, cx| {
-            let tool = this.settings.external_tool.clone();
-            this.choose_tool(tool, None, cx);
-          });
-        }))
-        .item(PopupMenuItem::new(t("Use PATH")).on_click(move |_, _, cx| {
-          let _ = path_view.update(cx, |this, cx| {
-            let tool = this.settings.external_tool.clone();
-            this.settings.tool_paths.remove(&tool);
-            this.save_settings();
-            if external_tools::resolve(&tool, None).is_none() {
-              this.choose_tool(tool, None, cx);
-            }
-            cx.notify();
-          });
-        }))
     })
   }
 }

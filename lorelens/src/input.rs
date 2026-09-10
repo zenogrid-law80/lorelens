@@ -39,6 +39,7 @@ pub struct TextInput {
   last_layout: Option<ShapedLine>,
   last_bounds: Option<Bounds<Pixels>>,
   is_selecting: bool,
+  read_only: bool,
 }
 
 pub fn init(cx: &mut App) {
@@ -70,7 +71,13 @@ impl TextInput {
       last_layout: None,
       last_bounds: None,
       is_selecting: false,
+      read_only: false,
     }
+  }
+
+  pub fn read_only(mut self) -> Self {
+    self.read_only = true;
+    self
   }
 }
 
@@ -288,6 +295,9 @@ impl EntityInputHandler for TextInput {
   }
 
   fn replace_text_in_range(&mut self, range_utf16: Option<Range<usize>>, new_text: &str, _: &mut Window, cx: &mut Context<Self>) {
+    if self.read_only {
+      return;
+    }
     let range = range_utf16
       .as_ref()
       .map(|range_utf16| self.range_from_utf16(range_utf16))
@@ -301,6 +311,9 @@ impl EntityInputHandler for TextInput {
   }
 
   fn replace_and_mark_text_in_range(&mut self, range_utf16: Option<Range<usize>>, new_text: &str, new_selected_range_utf16: Option<Range<usize>>, _window: &mut Window, cx: &mut Context<Self>) {
+    if self.read_only {
+      return;
+    }
     let range = range_utf16
       .as_ref()
       .map(|range_utf16| self.range_from_utf16(range_utf16))

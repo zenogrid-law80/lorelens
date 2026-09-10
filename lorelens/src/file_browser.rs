@@ -142,7 +142,12 @@ impl Lens {
           (None, _) => 0,
         };
         let (path, directory) = &visible[index];
-        if *directory {
+        if modifiers.shift {
+          let visible_paths: Vec<_> = visible.iter().map(|(path, _)| path.clone()).collect();
+          this.selection.click(path.clone(), &visible_paths, modifiers.control || modifiers.platform, true);
+          this.preview.invalidate();
+          this.notice = tf("{count} items selected", &[("count", this.selection.paths.len().to_string())]);
+        } else if *directory {
           this.selection.current = Some(path.clone());
           this.selection.paths.clear();
           this.selection.paths.insert(path.clone());
@@ -306,6 +311,7 @@ impl Lens {
                 }
                 let ready = !lens.busy;
                 let vcs = ready && lens.connected;
+                let shortcuts = lens.settings.shortcuts.clone();
                 let has_folders = selected_paths.iter().any(|p| lens.root.join(p).is_dir());
                 let changes: Vec<_> = lens
                   .status
@@ -333,25 +339,34 @@ impl Lens {
                   let targets = selected_paths.clone();
                   let root = context_root.clone();
                   let action_view = view.clone();
-                  menu = menu.item(PopupMenuItem::new(t(label)).disabled(!enabled).on_click(move |_, window, cx| {
-                    let _ = action_view.update(cx, |this, cx| {
-                      if this.busy || !this.connected || this.root != root {
-                        return;
-                      }
-                      if has_folders {
-                        this.folder_changes_dialog(targets.clone(), action, window, cx);
-                      } else if action == "stage" {
-                        if !this.pending_paths_valid(&paths, Some(false)) {
-                          return;
-                        }
-                        let mut args = vec!["stage".into(), "--".into()];
-                        args.extend(paths.clone());
-                        this.command(args, label, false, true, cx);
-                      } else {
-                        this.revert_dialog(paths.clone(), action == "unstage", window, cx);
-                      }
-                    });
-                  }));
+                  let shortcut = match action {
+                    "stage" => "stage",
+                    "unstage" => "unstage",
+                    _ => "revert",
+                  };
+                  menu = menu.item(
+                    PopupMenuItem::new(shortcuts::shortcut_label(&shortcuts, label, shortcut))
+                      .disabled(!enabled)
+                      .on_click(move |_, window, cx| {
+                        let _ = action_view.update(cx, |this, cx| {
+                          if this.busy || !this.connected || this.root != root {
+                            return;
+                          }
+                          if has_folders {
+                            this.folder_changes_dialog(targets.clone(), action, window, cx);
+                          } else if action == "stage" {
+                            if !this.pending_paths_valid(&paths, Some(false)) {
+                              return;
+                            }
+                            let mut args = vec!["stage".into(), "--".into()];
+                            args.extend(paths.clone());
+                            this.command(args, label, false, true, cx);
+                          } else {
+                            this.revert_dialog(paths.clone(), action == "unstage", window, cx);
+                          }
+                        });
+                      }),
+                  );
                 }
                 let sources: Vec<_> = selected_paths.iter().map(|p| context_root.join(p)).collect();
                 let copy = sources.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n");
@@ -362,13 +377,17 @@ impl Lens {
                   .item(PopupMenuItem::new(t("Copy selected full paths")).on_click(move |_, _, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
                   }))
-                  .item(PopupMenuItem::new(t("Delete…")).disabled(!ready).on_click(move |_, window, cx| {
-                    let _ = delete_view.update(cx, |this, cx| {
-                      if this.root == root {
-                        this.delete_files_dialog(sources.clone(), window, cx);
-                      }
-                    });
-                  }));
+                  .item(
+                    PopupMenuItem::new(shortcuts::shortcut_label(&shortcuts, "Delete…", "delete"))
+                      .disabled(!ready)
+                      .on_click(move |_, window, cx| {
+                        let _ = delete_view.update(cx, |this, cx| {
+                          if this.root == root {
+                            this.delete_files_dialog(sources.clone(), window, cx);
+                          }
+                        });
+                      }),
+                  );
                 if lens.obliterate_enabled && !has_folders {
                   let root = context_root.clone();
                   let action_view = view.clone();
@@ -421,6 +440,7 @@ impl Lens {
                     .collect()
                 })
                 .unwrap_or_default();
+              let shortcut_settings = view.upgrade().map(|entity| entity.read(cx).settings.shortcuts.clone()).unwrap_or_default();
               let bulk_enabled = view.upgrade().is_some_and(|entity| {
                 let lens = entity.read(cx);
                 !lens.busy && lens.connected && lens.root == context_root
@@ -439,41 +459,53 @@ impl Lens {
                 let resolve_view = view.clone();
                 let resolve_root = context_root.clone();
                 let resolve_path = context_relative.clone();
-                menu = menu.item(PopupMenuItem::new(t("Resolve")).disabled(!bulk_enabled).on_click(move |_, _, cx| {
-                  let _ = resolve_view.update(cx, |this, cx| {
-                    if this.root == resolve_root && this.status.changes.iter().any(|change| change.path == resolve_path && change.conflict) {
-                      this.external_diff(resolve_path.clone(), cx);
-                    }
-                  });
-                }));
+                menu = menu.item(
+                  PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Resolve", "diff"))
+                    .disabled(!bulk_enabled)
+                    .on_click(move |_, _, cx| {
+                      let _ = resolve_view.update(cx, |this, cx| {
+                        if this.root == resolve_root && this.status.changes.iter().any(|change| change.path == resolve_path && change.conflict) {
+                          this.external_diff(resolve_path.clone(), cx);
+                        }
+                      });
+                    }),
+                );
               }
               if !selected_unstaged.is_empty() {
                 let action_view = view.clone();
                 let root = context_root.clone();
-                menu = menu.item(PopupMenuItem::new(t("Stage selected")).disabled(!bulk_enabled).on_click(move |_, _, cx| {
-                  let _ = action_view.update(cx, |this, cx| {
-                    if this.root != root || !this.pending_paths_valid(&selected_unstaged, Some(false)) {
-                      return;
-                    }
-                    let mut args = vec!["stage".into(), "--".into()];
-                    args.extend(selected_unstaged.clone());
-                    this.command(args, "Stage selected", false, true, cx);
-                  });
-                }));
+                menu = menu.item(
+                  PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Stage selected", "stage"))
+                    .disabled(!bulk_enabled)
+                    .on_click(move |_, _, cx| {
+                      let _ = action_view.update(cx, |this, cx| {
+                        if this.root != root || !this.pending_paths_valid(&selected_unstaged, Some(false)) {
+                          return;
+                        }
+                        let mut args = vec!["stage".into(), "--".into()];
+                        args.extend(selected_unstaged.clone());
+                        this.command(args, "Stage selected", false, true, cx);
+                      });
+                    }),
+                );
               }
               if !selected_staged.is_empty() {
                 let action_view = view.clone();
                 let root = context_root.clone();
-                menu = menu.item(PopupMenuItem::new(t("Unstage selected")).disabled(!bulk_enabled).on_click(move |_, _, cx| {
-                  let _ = action_view.update(cx, |this, cx| {
-                    if this.root != root || !this.pending_paths_valid(&selected_staged, Some(true)) {
-                      return;
-                    }
-                    let mut args = vec!["unstage".into(), "--".into()];
-                    args.extend(selected_staged.clone());
-                    this.command(args, "Unstage selected", false, true, cx);
-                  });
-                }));
+                menu = menu.item(
+                  PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Unstage selected", "unstage"))
+                    .disabled(!bulk_enabled)
+                    .on_click(move |_, _, cx| {
+                      let _ = action_view.update(cx, |this, cx| {
+                        if this.root != root || !this.pending_paths_valid(&selected_staged, Some(true)) {
+                          return;
+                        }
+                        let mut args = vec!["unstage".into(), "--".into()];
+                        args.extend(selected_staged.clone());
+                        this.command(args, "Unstage selected", false, true, cx);
+                      });
+                    }),
+                );
               }
               if selected_paths.len() > 1 || !selected_changes.is_empty() {
                 menu = menu.separator();
@@ -487,13 +519,17 @@ impl Lens {
                   !lens.busy && lens.connected && lens.root == folder_root && lens.status.changes.iter().any(|c| std::path::Path::new(&c.path).starts_with(&folder_path))
                 });
                 menu
-                  .item(PopupMenuItem::new(t("Revert folder")).disabled(!enabled).on_click(move |_, window, cx| {
-                    let _ = folder_view.update(cx, |this, cx| {
-                      if this.root == folder_root {
-                        this.folder_changes_dialog(vec![folder_path.clone()], "reset", window, cx);
-                      }
-                    });
-                  }))
+                  .item(
+                    PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Revert folder", "revert"))
+                      .disabled(!enabled)
+                      .on_click(move |_, window, cx| {
+                        let _ = folder_view.update(cx, |this, cx| {
+                          if this.root == folder_root {
+                            this.folder_changes_dialog(vec![folder_path.clone()], "reset", window, cx);
+                          }
+                        });
+                      }),
+                  )
                   .separator()
               } else {
                 menu
@@ -511,13 +547,17 @@ impl Lens {
                   lens.connected && !lens.busy && lens.root == context_root
                 });
                 menu
-                  .item(PopupMenuItem::new(t("Diff")).disabled(!enabled).on_click(move |_, _, cx| {
-                    let _ = diff_view.update(cx, |this, cx| {
-                      if this.root == diff_root && this.status.changes.iter().any(|change| change.path == diff_path && change.file_marker() == "M") {
-                        this.external_diff(diff_path.clone(), cx);
-                      }
-                    });
-                  }))
+                  .item(
+                    PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Diff", "diff"))
+                      .disabled(!enabled)
+                      .on_click(move |_, _, cx| {
+                        let _ = diff_view.update(cx, |this, cx| {
+                          if this.root == diff_root && this.status.changes.iter().any(|change| change.path == diff_path && change.file_marker() == "M") {
+                            this.external_diff(diff_path.clone(), cx);
+                          }
+                        });
+                      }),
+                  )
                   .separator()
               } else {
                 menu
@@ -558,26 +598,30 @@ impl Lens {
                   } else {
                     "Stage file"
                   };
-                  menu = menu.item(PopupMenuItem::new(t(label)).disabled(!enabled).on_click(move |_, window, cx| {
-                    let _ = stage_view.update(cx, |this, cx| {
-                      if this.busy
-                        || !this.connected
-                        || this.root != stage_root
-                        || !this
-                          .status
-                          .changes
-                          .iter()
-                          .any(|c| (c.path == stage_path || (directory && std::path::Path::new(&c.path).starts_with(&stage_path))) && (!unstage || c.staged))
-                      {
-                        return;
-                      }
-                      if directory {
-                        this.folder_changes_dialog(vec![stage_path.clone()], if unstage { "unstage" } else { "stage" }, window, cx);
-                        return;
-                      }
-                      this.command(vec![if unstage { "unstage" } else { "stage" }.into(), "--".into(), stage_path.clone()], label, false, true, cx);
-                    });
-                  }));
+                  menu = menu.item(
+                    PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, label, if unstage { "unstage" } else { "stage" }))
+                      .disabled(!enabled)
+                      .on_click(move |_, window, cx| {
+                        let _ = stage_view.update(cx, |this, cx| {
+                          if this.busy
+                            || !this.connected
+                            || this.root != stage_root
+                            || !this
+                              .status
+                              .changes
+                              .iter()
+                              .any(|c| (c.path == stage_path || (directory && std::path::Path::new(&c.path).starts_with(&stage_path))) && (!unstage || c.staged))
+                          {
+                            return;
+                          }
+                          if directory {
+                            this.folder_changes_dialog(vec![stage_path.clone()], if unstage { "unstage" } else { "stage" }, window, cx);
+                            return;
+                          }
+                          this.command(vec![if unstage { "unstage" } else { "stage" }.into(), "--".into(), stage_path.clone()], label, false, true, cx);
+                        });
+                      }),
+                  );
                 }
                 menu.separator()
               } else {
@@ -592,7 +636,7 @@ impl Lens {
                 let discard_path = context_relative.clone();
                 let discard_root = context_root.clone();
                 menu
-                  .item(PopupMenuItem::new(t("Discard")).on_click(move |_, _, cx| {
+                  .item(PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Discard", "revert")).on_click(move |_, _, cx| {
                     let _ = discard_view.update(cx, |this, cx| {
                       if this.busy || this.root != discard_root || !this.status.changes.iter().any(|c| c.path == discard_path) || this.root.join(&discard_path).is_dir() {
                         return;
@@ -605,6 +649,10 @@ impl Lens {
                 menu
               };
               let move_view = view.clone();
+              let bookmark_view = view.clone();
+              let bookmark_path = context_path.clone();
+              let bookmark_root = context_root.clone();
+              let bookmarked = view.upgrade().is_some_and(|entity| entity.read(cx).settings.is_bookmarked(&context_root, &context_path));
               let delete_view = view.clone();
               let delete_path = context_path.clone();
               let delete_root = context_root.clone();
@@ -629,17 +677,42 @@ impl Lens {
                   cx.write_to_clipboard(ClipboardItem::new_string(copy_path.to_string_lossy().into_owned()));
                 }))
                 .item(
-                  PopupMenuItem::new(t(if cfg!(target_os = "macos") { "Show in Finder" } else { "Show in Explorer" })).on_click(move |_, _, cx| {
+                  PopupMenuItem::new(shortcuts::shortcut_label(
+                    &shortcut_settings,
+                    if cfg!(target_os = "macos") { "Show in Finder" } else { "Show in Explorer" },
+                    "reveal",
+                  ))
+                  .on_click(move |_, _, cx| {
                     cx.reveal_path(&reveal_path);
                   }),
                 )
-                .item(PopupMenuItem::new(t("Open Command Window Here")).on_click(move |_, _, cx| {
-                  let _ = terminal_view.update(cx, |this, cx| {
-                    this.open_command_window(&terminal_path);
+                .item(
+                  PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Open Command Window Here", "terminal")).on_click(move |_, _, cx| {
+                    let _ = terminal_view.update(cx, |this, cx| {
+                      this.open_command_window(&terminal_path);
+                      cx.notify();
+                    });
+                  }),
+                )
+                .separator();
+              let menu = menu.item(
+                PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, if bookmarked { "Remove bookmark" } else { "Add bookmark" }, "bookmark")).on_click(move |_, _, cx| {
+                  let _ = bookmark_view.update(cx, |this, cx| {
+                    if this.root != bookmark_root {
+                      return;
+                    }
+                    let added = this.settings.toggle_bookmark(&bookmark_root, &bookmark_path);
+                    if this.save_settings() {
+                      this.error = false;
+                      this.notice = tf(
+                        if added { "Bookmark added: {path}" } else { "Bookmark removed: {path}" },
+                        &[("path", bookmark_path.strip_prefix(&bookmark_root).unwrap_or(&bookmark_path).display().to_string())],
+                      );
+                    }
                     cx.notify();
                   });
-                }))
-                .separator();
+                }),
+              );
               let menu = if !directory {
                 let state = std::rc::Rc::new(std::cell::RefCell::new(None::<Result<bool, String>>));
                 let display_state = state.clone();
@@ -654,6 +727,7 @@ impl Lens {
                 let identity = entity.read(cx).settings.identity.clone();
                 let query_path = context_path.clone();
                 let original_root = root.clone();
+                let lock_shortcuts = shortcut_settings.clone();
                 let task = cx.background_executor().spawn(async move {
                   backend::run_as(
                     &cli,
@@ -681,12 +755,16 @@ impl Lens {
                 menu
                   .item(
                     PopupMenuItem::element(move |_, _| {
-                      div().child(t(match display_state.borrow().as_ref() {
-                        None => "Checking lock status…",
-                        Some(Ok(true)) => "Unlock",
-                        Some(Ok(false)) => "Lock",
-                        Some(Err(_)) => "Lock status unavailable — reopen to retry",
-                      }))
+                      div().child(shortcuts::shortcut_label(
+                        &lock_shortcuts,
+                        match display_state.borrow().as_ref() {
+                          None => "Checking lock status…",
+                          Some(Ok(true)) => "Unlock",
+                          Some(Ok(false)) => "Lock",
+                          Some(Err(_)) => "Lock status unavailable — reopen to retry",
+                        },
+                        "lock",
+                      ))
                     })
                     .on_click(move |_, _, cx| {
                       let Some(Ok(locked)) = action_state.borrow().as_ref().cloned() else {
@@ -715,13 +793,17 @@ impl Lens {
               } else {
                 menu
               };
-              let menu = menu.item(PopupMenuItem::new(t("Delete…")).disabled(!delete_enabled).on_click(move |_, window, cx| {
-                let _ = delete_view.update(cx, |this, cx| {
-                  if this.root == delete_root {
-                    this.delete_dialog(delete_path.clone(), window, cx);
-                  }
-                });
-              }));
+              let menu = menu.item(
+                PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Delete…", "delete"))
+                  .disabled(!delete_enabled)
+                  .on_click(move |_, window, cx| {
+                    let _ = delete_view.update(cx, |this, cx| {
+                      if this.root == delete_root {
+                        this.delete_dialog(delete_path.clone(), window, cx);
+                      }
+                    });
+                  }),
+              );
               if !directory && view.upgrade().is_some_and(|entity| entity.read(cx).obliterate_enabled) {
                 let action_view = view.clone();
                 let path = context_relative.clone();

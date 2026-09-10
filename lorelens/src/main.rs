@@ -87,6 +87,7 @@ struct Lens {
   message: Entity<TextInput>,
   filter: Entity<TextInput>,
   pending_filter: Entity<TextInput>,
+  selected_path: Entity<TextInput>,
   pending_visible: Vec<usize>,
   notice: String,
   error: bool,
@@ -267,6 +268,7 @@ impl Lens {
     cx.observe(&filter, |_, _, cx| cx.notify()).detach();
     let pending_filter = cx.new(|cx| TextInput::new("Filter changes…", cx));
     cx.observe(&pending_filter, |_, _, cx| cx.notify()).detach();
+    let selected_path = cx.new(|cx| TextInput::new("", cx).read_only());
     let mut view = Self {
             files_focus: cx.focus_handle(),
             pending_focus: cx.focus_handle(),
@@ -280,7 +282,7 @@ impl Lens {
             selection: SelectionState::default(), preview: PreviewState::default(), output: "Open a folder to browse local files.\n\nFor version control, open a Lore repository and locate the Lore CLI.\nUse Sync to synchronize the current repository. Commits are not pushed automatically.".into(),
             output_title: "Welcome to LoreLens".into(), logs: vec![],
             message: cx.new(|cx| TextInput::new("Describe your staged changes…", cx)),
-            filter, pending_filter, pending_visible: Vec::new(), notice: "Opening repository…".into(), error: false, show_log: false, obliterate_enabled: false,
+            filter, pending_filter, selected_path, pending_visible: Vec::new(), notice: "Opening repository…".into(), error: false, show_log: false, obliterate_enabled: false,
             settings, settings_error, branch_output: String::new(), show_branches: false,
             connect_after_load,
             startup_login_pending: false,
@@ -294,6 +296,14 @@ impl Lens {
         };
     view.load_directory(cx);
     cx.observe(&cx.entity(), |this, _, cx| {
+      let path = this.selection.current.as_ref().map(|path| this.root.join(path).display().to_string()).unwrap_or_default();
+      this.selected_path.update(cx, |input, cx| {
+        if input.content.as_ref() != path {
+          input.reset();
+          input.content = path.into();
+          cx.notify();
+        }
+      });
       if this.refresh_pending && !this.busy {
         this.refresh(cx);
       }
@@ -399,14 +409,18 @@ impl Lens {
         match result {
           Ok(entries) => {
             this.entries = entries;
-            if let Some(folder) = this.folder_to_select.take()
-              && let Some(index) = this.entries.iter().position(|entry| entry.path == folder)
+            if let Some(target) = this.folder_to_select.take()
+              && let Some(index) = this.entries.iter().position(|entry| entry.path == target)
             {
-              let relative = folder.strip_prefix(&this.root).unwrap_or(&folder).to_string_lossy().replace('\\', "/");
-              this.selection.current = Some(relative.clone());
-              this.selection.paths.clear();
-              this.selection.paths.insert(relative.clone());
-              this.selection.anchor = Some(relative);
+              let relative = target.strip_prefix(&this.root).unwrap_or(&target).to_string_lossy().replace('\\', "/");
+              if this.entries[index].directory {
+                this.selection.current = Some(relative.clone());
+                this.selection.paths.clear();
+                this.selection.paths.insert(relative.clone());
+                this.selection.anchor = Some(relative);
+              } else {
+                this.select(relative, cx);
+              }
               this.files_scroll.scroll_to_item(index);
             }
             this.error = false;
@@ -427,6 +441,31 @@ impl Lens {
     })
     .detach();
     cx.notify();
+  }
+
+  fn open_bookmark(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    if self.busy || !path.starts_with(&self.root) || path == self.root {
+      return;
+    }
+    if !path.exists() {
+      self.settings.prune_bookmarks();
+      self.save_settings();
+      self.error = true;
+      self.notice = tf("Bookmark unavailable: {path}", &[("path", path.display().to_string())]);
+      cx.notify();
+      return;
+    }
+    let mut parent = path.parent();
+    while let Some(folder) = parent.filter(|folder| *folder != self.root) {
+      self.expanded_folders.insert(folder.to_path_buf());
+      parent = folder.parent();
+    }
+    self.filter.update(cx, |input, cx| {
+      input.reset();
+      cx.notify();
+    });
+    self.folder_to_select = Some(path);
+    self.load_directory(cx);
   }
 
   fn choose(&mut self, executable: bool, cx: &mut Context<Self>) {
@@ -635,19 +674,24 @@ impl Lens {
           if !enabled {
             return menu;
           }
+          let shortcut_settings = view.upgrade().map(|entity| entity.read(cx).settings.shortcuts.clone()).unwrap_or_default();
           if !stage_paths.is_empty() {
             let view = view.clone();
             let root = context_root.clone();
-            menu = menu.item(PopupMenuItem::new(t("Stage")).disabled(!enabled).on_click(move |_, _, cx| {
-              let _ = view.update(cx, |this, cx| {
-                if this.busy || !this.connected || this.root != root || !this.pending_paths_valid(&stage_paths, Some(false)) {
-                  return;
-                }
-                let mut args = vec!["stage".into(), "--".into()];
-                args.extend(stage_paths.iter().cloned());
-                this.command(args, "Stage", false, true, cx);
-              });
-            }));
+            menu = menu.item(
+              PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Stage", "stage"))
+                .disabled(!enabled)
+                .on_click(move |_, _, cx| {
+                  let _ = view.update(cx, |this, cx| {
+                    if this.busy || !this.connected || this.root != root || !this.pending_paths_valid(&stage_paths, Some(false)) {
+                      return;
+                    }
+                    let mut args = vec!["stage".into(), "--".into()];
+                    args.extend(stage_paths.iter().cloned());
+                    this.command(args, "Stage", false, true, cx);
+                  });
+                }),
+            );
           }
           for unstage_only in [true, false] {
             if (unstage_only && unstage_paths.is_empty()) || (!unstage_only && !revert) {
@@ -657,13 +701,17 @@ impl Lens {
             let paths = if unstage_only { unstage_paths.clone() } else { paths.clone() };
             let root = context_root.clone();
             menu = menu.item(
-              PopupMenuItem::new(t(if unstage_only {
-                "Unstage…"
-              } else if paths.len() > 1 {
-                "Revert selected files"
-              } else {
-                "Revert file…"
-              }))
+              PopupMenuItem::new(shortcuts::shortcut_label(
+                &shortcut_settings,
+                if unstage_only {
+                  "Unstage…"
+                } else if paths.len() > 1 {
+                  "Revert selected files"
+                } else {
+                  "Revert file…"
+                },
+                if unstage_only { "unstage" } else { "revert" },
+              ))
               .disabled(!enabled)
               .on_click(move |_, window, cx| {
                 let _ = view.update(cx, |this, cx| {

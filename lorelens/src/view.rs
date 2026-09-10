@@ -225,44 +225,28 @@ impl Render for Lens {
             .bg(rgb(PANEL))
             .child(div().overflow_hidden().border_1().border_color(rgb(BORDER)).rounded_md().child(self.pending_filter.clone()))
             .child(
-              div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .text_size(px(12.))
-                .child(
-                  gpui_component::checkbox::Checkbox::new("select-visible-changes")
-                    .label(tf("{count} changed files", &[("count", visible_count.to_string())]))
-                    .checked(all_visible_selected)
-                    .disabled(self.busy || visible_paths.is_empty())
-                    .on_click(cx.listener(move |this, checked: &bool, _, cx| {
-                      if this.busy {
-                        return;
+              div().flex().items_center().gap_2().text_size(px(12.)).child(
+                gpui_component::checkbox::Checkbox::new("select-visible-changes")
+                  .label(tf("{count} changed files", &[("count", visible_count.to_string())]))
+                  .checked(all_visible_selected)
+                  .disabled(self.busy || visible_paths.is_empty())
+                  .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                    if this.busy {
+                      return;
+                    }
+                    if *checked {
+                      this.selection.select_all(&visible_paths);
+                    } else {
+                      for path in &visible_paths {
+                        this.selection.paths.remove(path);
                       }
-                      if *checked {
-                        this.selection.select_all(&visible_paths);
-                      } else {
-                        for path in &visible_paths {
-                          this.selection.paths.remove(path);
-                        }
-                        this.selection.current = this.selection.paths.iter().next().cloned();
-                        this.selection.anchor = this.selection.current.clone();
-                      }
-                      this.preview.invalidate();
-                      cx.notify();
-                    })),
-                )
-                .child(div().flex_1())
-                .child(
-                  gpui_component::checkbox::Checkbox::new("enable-obliterate")
-                    .label(t("Obliterate"))
-                    .checked(self.obliterate_enabled)
-                    .disabled(self.busy)
-                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                      this.obliterate_enabled = *checked;
-                      cx.notify();
-                    })),
-                ),
+                      this.selection.current = this.selection.paths.iter().next().cloned();
+                      this.selection.anchor = this.selection.current.clone();
+                    }
+                    this.preview.invalidate();
+                    cx.notify();
+                  })),
+              ),
             ),
         )
         .child(
@@ -384,8 +368,7 @@ impl Render for Lens {
             )
             .child(self.app_menu("Repository", false, cx))
             .child(self.app_menu("Changes", false, cx))
-            .child(self.tool_menu(cx))
-            .child(self.shortcut_menu(cx))
+            .child(self.options_menu(cx))
             .child(self.app_menu("View", false, cx))
             .child(div().flex_1())
             .child(self.app_menu("Account", false, cx)),
@@ -423,6 +406,31 @@ impl Render for Lens {
           } else {
             t("Lore not connected")
           })),
+      )
+      .child(
+        div()
+          .h(px(38.))
+          .flex_shrink_0()
+          .flex()
+          .items_center()
+          .gap_2()
+          .px_4()
+          .border_b_1()
+          .border_color(rgb(BORDER))
+          .text_size(px(11.))
+          .text_color(rgb(MUTED))
+          .child(t("Path"))
+          .child(
+            div()
+              .flex_1()
+              .min_w_0()
+              .overflow_hidden()
+              .rounded_md()
+              .border_1()
+              .border_color(rgb(BORDER))
+              .child(self.selected_path.clone()),
+          )
+          .child(div().flex().items_center().child(self.bookmark_toggle(cx)).child(self.bookmark_list(cx))),
       )
       .child(div().flex().flex_1().min_h_0().child(sidebar).child(right))
       .child(

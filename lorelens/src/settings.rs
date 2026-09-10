@@ -4,11 +4,18 @@ use std::{
   path::{Path, PathBuf},
 };
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Bookmark {
+  pub root: PathBuf,
+  pub path: PathBuf,
+}
+
 pub struct Settings {
   pub shortcuts: std::collections::BTreeMap<String, String>,
   pub login_remote: Option<String>,
   pub login_urls: Vec<String>,
   pub recent: Vec<PathBuf>,
+  pub bookmarks: Vec<Bookmark>,
   pub cli: Option<PathBuf>,
   pub theme: String,
   pub language: String,
@@ -32,6 +39,7 @@ impl Default for Settings {
       login_remote: None,
       login_urls: Vec::new(),
       recent: Vec::new(),
+      bookmarks: Vec::new(),
       cli: None,
       theme: "System".into(),
       language: "en-US".into(),
@@ -86,6 +94,19 @@ impl Settings {
       .take(10)
       .collect()
   }
+
+  fn normalized_bookmarks(bookmarks: impl IntoIterator<Item = Bookmark>) -> Vec<Bookmark> {
+    let mut seen = std::collections::HashSet::new();
+    bookmarks
+      .into_iter()
+      .filter_map(|bookmark| {
+        let root = Self::normalize_recent_path(&bookmark.root);
+        let path = bookmark.path;
+        (!path.as_os_str().is_empty() && !path.is_absolute()).then_some(Bookmark { root, path })
+      })
+      .filter(|bookmark| seen.insert((Self::recent_key(&bookmark.root), Self::recent_key(&bookmark.path))))
+      .collect()
+  }
   /// Older settings stored login input history but no successful-login URL.
   /// Only recover an unambiguous destination; history is not proof of authentication.
   pub fn clone_remote(&self) -> Option<String> {
@@ -119,12 +140,30 @@ impl Settings {
     };
     let data: Value = serde_json::from_str(&text)?;
     let recent: Vec<PathBuf> = serde_json::from_value(data.get("recent").cloned().unwrap_or(json!([])))?;
+    let bookmarks: Vec<Bookmark> = data["bookmarks"]
+      .as_array()
+      .into_iter()
+      .flatten()
+      .filter_map(|bookmark| {
+        Some(Bookmark {
+          root: PathBuf::from(bookmark["root"].as_str()?),
+          path: PathBuf::from(bookmark["path"].as_str()?),
+        })
+      })
+      .collect();
+    let mut shortcuts: std::collections::BTreeMap<String, String> = serde_json::from_value(data.get("shortcuts").cloned().unwrap_or(json!({})))?;
+    // Ctrl+H was the old File history default. It now opens a command window,
+    // so migrate settings saved before the terminal shortcut was introduced.
+    if shortcuts.get("history").is_some_and(|shortcut| shortcut.eq_ignore_ascii_case("Ctrl+H")) && !shortcuts.contains_key("terminal") {
+      shortcuts.insert("history".into(), "Ctrl+Shift+H".into());
+    }
     let cli = serde_json::from_value(data.get("cli").cloned().unwrap_or(Value::Null))?;
     Ok(Self {
-      shortcuts: serde_json::from_value(data.get("shortcuts").cloned().unwrap_or(json!({})))?,
+      shortcuts,
       login_remote: data["login_remote"].as_str().filter(|url| !url.trim().is_empty()).map(str::to_owned),
       login_urls: serde_json::from_value(data.get("login_urls").cloned().unwrap_or(json!([])))?,
       recent: Self::normalized_recent(recent),
+      bookmarks: Self::normalized_bookmarks(bookmarks),
       cli,
       language: crate::i18n::normalize(data["language"].as_str().unwrap_or("en-US")).into(),
       theme: data["theme"].as_str().unwrap_or("System").to_string(),
@@ -158,6 +197,54 @@ impl Settings {
       Err(error) => error.kind() != io::ErrorKind::NotFound,
     });
     self.recent.len() != before
+  }
+
+  pub fn is_bookmarked(&self, root: &Path, path: &Path) -> bool {
+    let root = Self::normalize_recent_path(root);
+    let Some(path) = path.strip_prefix(&root).ok().filter(|path| !path.as_os_str().is_empty()) else {
+      return false;
+    };
+    let key = (Self::recent_key(&root), Self::recent_key(path));
+    self.bookmarks.iter().any(|bookmark| (Self::recent_key(&bookmark.root), Self::recent_key(&bookmark.path)) == key)
+  }
+
+  pub fn toggle_bookmark(&mut self, root: &Path, path: &Path) -> bool {
+    let root = Self::normalize_recent_path(root);
+    let Some(path) = path.strip_prefix(&root).ok().filter(|path| !path.as_os_str().is_empty()).map(Path::to_path_buf) else {
+      return false;
+    };
+    let key = (Self::recent_key(&root), Self::recent_key(&path));
+    if let Some(index) = self.bookmarks.iter().position(|bookmark| (Self::recent_key(&bookmark.root), Self::recent_key(&bookmark.path)) == key) {
+      self.bookmarks.remove(index);
+      false
+    } else {
+      self.bookmarks.push(Bookmark { root, path });
+      true
+    }
+  }
+
+  pub fn bookmarks_for(&self, root: &Path) -> Vec<PathBuf> {
+    let root = Self::normalize_recent_path(root);
+    let key = Self::recent_key(&root);
+    self
+      .bookmarks
+      .iter()
+      .filter(|bookmark| Self::recent_key(&bookmark.root) == key && root.join(&bookmark.path).exists())
+      .map(|bookmark| bookmark.path.clone())
+      .collect()
+  }
+
+  pub fn replace_bookmarks(&mut self, bookmarks: Vec<Bookmark>) {
+    self.bookmarks = Self::normalized_bookmarks(bookmarks);
+  }
+
+  pub fn prune_bookmarks(&mut self) -> bool {
+    let before = self.bookmarks.len();
+    self.bookmarks.retain(|bookmark| match fs::metadata(bookmark.root.join(&bookmark.path)) {
+      Ok(_) => true,
+      Err(error) => error.kind() != io::ErrorKind::NotFound,
+    });
+    self.bookmarks.len() != before
   }
 
   pub fn remember_create(&mut self, url: &str, destination: &str) {
@@ -205,9 +292,13 @@ impl Settings {
     }
     let temp = path.with_extension(format!("{}.tmp", std::process::id()));
     let mut file = fs::File::create(&temp)?;
+    let bookmarks: Vec<_> = Self::normalized_bookmarks(self.bookmarks.clone())
+      .into_iter()
+      .map(|bookmark| json!({"root": bookmark.root, "path": bookmark.path}))
+      .collect();
     serde_json::to_writer_pretty(
       &mut file,
-      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "recent": Self::normalized_recent(self.recent.clone()), "cli": self.cli, "theme": self.theme, "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
+      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "recent": Self::normalized_recent(self.recent.clone()), "bookmarks": bookmarks, "cli": self.cli, "theme": self.theme, "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
     )?;
     file.sync_all()?;
     drop(file);
@@ -262,6 +353,41 @@ mod tests {
     let path = root.path().join("settings.json");
     settings.save(&path).unwrap();
     assert_eq!(Settings::load(&path).unwrap().recent, settings.recent);
+  }
+
+  #[test]
+  fn bookmarks_persist_toggle_and_prune_missing_paths() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("bookmarked.txt");
+    fs::write(&file, "bookmark").unwrap();
+    let missing = root.path().join("missing.txt");
+    let mut settings = Settings::default();
+    assert!(settings.toggle_bookmark(root.path(), &file));
+    assert!(settings.is_bookmarked(root.path(), &file));
+    assert!(!settings.toggle_bookmark(root.path(), &file));
+    assert!(!settings.is_bookmarked(root.path(), &file));
+    assert!(settings.toggle_bookmark(root.path(), &file));
+    assert!(settings.toggle_bookmark(root.path(), &missing));
+    assert!(settings.prune_bookmarks());
+    assert_eq!(settings.bookmarks_for(root.path()), vec![PathBuf::from("bookmarked.txt")]);
+    let path = root.path().join("settings.json");
+    settings.save(&path).unwrap();
+    assert_eq!(Settings::load(&path).unwrap().bookmarks_for(root.path()), vec![PathBuf::from("bookmarked.txt")]);
+  }
+
+  #[test]
+  fn migrates_old_history_shortcut_away_from_command_window_shortcut() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("settings.json");
+    fs::write(&path, r#"{"shortcuts":{"history":"Ctrl+H","open":"Ctrl+O"}}"#).unwrap();
+    let settings = Settings::load(&path).unwrap();
+    assert_eq!(settings.shortcuts.get("history").map(String::as_str), Some("Ctrl+Shift+H"));
+    assert!(!settings.shortcuts.contains_key("terminal"));
+
+    fs::write(&path, r#"{"shortcuts":{"history":"Ctrl+H","terminal":"Alt+T"}}"#).unwrap();
+    let customized = Settings::load(&path).unwrap();
+    assert_eq!(customized.shortcuts.get("history").map(String::as_str), Some("Ctrl+H"));
+    assert_eq!(customized.shortcuts.get("terminal").map(String::as_str), Some("Alt+T"));
   }
   #[test]
   fn clone_recovers_legacy_login_url_without_guessing_between_servers() {

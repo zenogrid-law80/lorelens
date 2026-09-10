@@ -9,12 +9,16 @@ const COMMANDS: &[(&str, &str, &str, bool)] = &[
   ("stage", "Stage", "Ctrl+Shift+A", true),
   ("unstage", "Unstage", "Ctrl+Shift+U", true),
   ("delete", "Delete…", "Ctrl+D", true),
-  ("revert", "Revert file…", "Ctrl+Shift+R", true),
+  ("revert", "Revert file…", "Ctrl+R", true),
   ("commit", "Commit staged", "Ctrl+S", true),
   ("sync", "Sync", "Ctrl+Shift+G", true),
   ("push", "Push", "Ctrl+Shift+P", true),
-  ("history", "File history", "Ctrl+H", true),
+  ("history", "File history", "Ctrl+Shift+H", true),
   ("diff", "Diff", "Ctrl+Shift+D", true),
+  ("lock", "Lock", "Ctrl+L", true),
+  ("bookmark", "Bookmark", "Ctrl+B", true),
+  ("terminal", "Open Command Window Here", "Ctrl+H", true),
+  ("reveal", "Show in Explorer", "Ctrl+I", true),
 ];
 
 fn normalize(value: &str) -> Result<String, String> {
@@ -60,6 +64,14 @@ fn binding(settings: &settings::Settings, id: &str, default: &str) -> String {
   normalize(settings.shortcuts.get(id).map(String::as_str).unwrap_or(default)).unwrap_or_default()
 }
 
+pub(super) fn shortcut_label(shortcuts: &BTreeMap<String, String>, label: &str, id: &str) -> String {
+  let Some(&(_, _, default, _)) = COMMANDS.iter().find(|&&(command, _, _, _)| command == id) else {
+    return t(label);
+  };
+  let key = normalize(shortcuts.get(id).map(String::as_str).unwrap_or(default)).unwrap_or_default();
+  if key.is_empty() { t(label) } else { format!("{}    {key}", t(label)) }
+}
+
 impl Lens {
   fn shortcut_enabled(&self, id: &str) -> bool {
     if self.busy {
@@ -75,7 +87,8 @@ impl Lens {
       "close" | "refresh" | "search" => true,
       "commit" => self.connected && self.status.changes.iter().any(|change| change.staged),
       "sync" | "push" => self.connected,
-      "stage" | "unstage" | "history" | "diff" | "delete" | "revert" => self.connected && self.selection.current.is_some(),
+      "bookmark" | "terminal" | "reveal" => self.selection.current.is_some(),
+      "stage" | "unstage" | "history" | "diff" | "delete" | "revert" | "lock" => self.connected && self.selection.current.is_some(),
       _ => false,
     }
   }
@@ -150,11 +163,49 @@ impl Lens {
       }
       "refresh" => self.refresh(cx),
       "search" => window.focus(&self.filter.read(cx).focus_handle(cx)),
+      "terminal" | "reveal" => {
+        let Some(relative) = self.selection.current.clone() else {
+          return;
+        };
+        let path = self.root.join(relative);
+        if id == "terminal" {
+          self.open_command_window(&path);
+        } else {
+          cx.reveal_path(&path);
+        }
+      }
+      "bookmark" => {
+        let Some(relative) = self.selection.current.clone() else {
+          return;
+        };
+        let path = self.root.join(relative);
+        let added = self.settings.toggle_bookmark(&self.root, &path);
+        if self.save_settings() {
+          self.error = false;
+          self.notice = tf(
+            if added { "Bookmark added: {path}" } else { "Bookmark removed: {path}" },
+            &[("path", path.strip_prefix(&self.root).unwrap_or(&path).display().to_string())],
+          );
+        }
+      }
       _ if !self.connected => return,
       "stage" | "unstage" | "history" | "diff" => self.file_command(id, window, cx),
       "commit" => self.commit_staged(cx),
       "sync" => self.command(vec!["sync".into()], "Sync", false, true, cx),
       "push" => self.command(vec!["push".into()], "Push", false, true, cx),
+      "lock" => {
+        let Some(path) = self.selection.current.clone() else {
+          return;
+        };
+        let locked = self.locked_paths.contains(&path);
+        self.command(
+          vec!["lock".into(), if locked { "release" } else { "acquire" }.into(), "--".into(), path],
+          if locked { "Unlock" } else { "Lock" },
+          false,
+          true,
+          cx,
+        );
+      }
       "revert" | "delete" => {
         let mut paths: Vec<_> = self.selection.paths.iter().cloned().collect();
         if paths.is_empty() {
@@ -175,30 +226,162 @@ impl Lens {
     cx.notify();
   }
 
-  pub(super) fn shortcut_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  pub(super) fn options_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let view = cx.entity().downgrade();
-    let rows: Vec<_> = COMMANDS
-      .iter()
-      .map(|&(id, label, default, supported)| (id, label, binding(&self.settings, id, default), supported))
-      .collect();
-    let enabled: Vec<_> = COMMANDS.iter().map(|&(id, _, _, _)| self.shortcut_enabled(id)).collect();
-    Button::new("shortcuts-menu").label(format!("{} ▾", t("Keyboard shortcuts"))).dropdown_menu(move |mut menu, _, _| {
-      let settings_view = view.clone();
-      menu = menu
-        .item(PopupMenuItem::new(t("Edit keyboard shortcuts…")).on_click(move |_, window, cx| {
-          let _ = settings_view.update(cx, |this, cx| this.shortcuts_dialog(window, cx));
+    let selected = self.settings.external_tool.clone();
+    let obliterate_enabled = self.obliterate_enabled;
+    let ready = !self.busy;
+    Button::new("options-menu").label(format!("{} ▾", t("Options"))).dropdown_menu(move |menu, window, cx| {
+      let selection_view = view.clone();
+      let current = selected.clone();
+      let menu = menu.submenu(tf("Diff / Merge: {selected}", &[("selected", selected.to_string())]), window, cx, move |mut menu, _, _| {
+        for tool in external_tools::TOOLS {
+          let view = selection_view.clone();
+          menu = menu.item(PopupMenuItem::new(if tool == current { format!("✓ {tool}") } else { tool.into() }).on_click(move |_, _, cx| {
+            let _ = view.update(cx, |this, cx| {
+              this.settings.external_tool = tool.into();
+              this.save_settings();
+              if external_tools::resolve(tool, this.settings.tool_paths.get(tool)).is_none() {
+                this.choose_tool(tool.into(), None, cx);
+              }
+              cx.notify();
+            });
+          }));
+        }
+        menu
+      });
+      let cli_view = view.clone();
+      let menu = menu.item(PopupMenuItem::new(t("Locate Lore CLI…")).on_click(move |_, _, cx| {
+        let _ = cli_view.update(cx, |this, cx| this.choose(true, cx));
+      }));
+      let locate_view = view.clone();
+      let path_view = view.clone();
+      let obliterate_view = view.clone();
+      let view = view.clone();
+      let menu = menu
+        .separator()
+        .item(PopupMenuItem::new(t("Locate executable…")).on_click(move |_, _, cx| {
+          let _ = locate_view.update(cx, |this, cx| {
+            let tool = this.settings.external_tool.clone();
+            this.choose_tool(tool, None, cx);
+          });
+        }))
+        .item(PopupMenuItem::new(t("Use PATH")).on_click(move |_, _, cx| {
+          let _ = path_view.update(cx, |this, cx| {
+            let tool = this.settings.external_tool.clone();
+            this.settings.tool_paths.remove(&tool);
+            this.save_settings();
+            if external_tools::resolve(&tool, None).is_none() {
+              this.choose_tool(tool, None, cx);
+            }
+            cx.notify();
+          });
+        }))
+        .separator()
+        .item(PopupMenuItem::new(t("Obliterate")).checked(obliterate_enabled).disabled(!ready).on_click(move |_, _, cx| {
+          let _ = obliterate_view.update(cx, |this, cx| {
+            if !this.busy {
+              this.obliterate_enabled = !this.obliterate_enabled;
+              cx.notify();
+            }
+          });
         }))
         .separator();
-      for (index, (id, label, key, supported)) in rows.iter().enumerate() {
-        let view = view.clone();
-        let id = *id;
-        let label = format!("{}   {}{}", t(label), key, if *supported { String::new() } else { format!(" — {}", t("Not supported in Lore")) });
-        menu = menu.item(PopupMenuItem::new(label).disabled(!supported || !enabled[index]).on_click(move |_, window, cx| {
-          let _ = view.update(cx, |this, cx| this.run_shortcut(id, window, cx));
-        }));
-      }
+      let bookmark_view = view.clone();
+      let settings_view = view.clone();
       menu
+        .item(PopupMenuItem::new(t("Manage bookmarks…")).on_click(move |_, window, cx| {
+          let _ = bookmark_view.update(cx, |this, cx| this.bookmarks_dialog(window, cx));
+        }))
+        .item(PopupMenuItem::new(t("Keyboard shortcuts")).on_click(move |_, window, cx| {
+          let _ = settings_view.update(cx, |this, cx| this.shortcuts_dialog(window, cx));
+        }))
     })
+  }
+
+  fn bookmarks_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let rows: Vec<_> = self
+      .settings
+      .bookmarks
+      .iter()
+      .enumerate()
+      .map(|(index, bookmark)| {
+        let input = cx.new(|cx| {
+          let mut input = TextInput::new("Relative path", cx);
+          input.content = bookmark.path.to_string_lossy().into_owned().into();
+          input
+        });
+        (index, bookmark.root.clone(), input, std::rc::Rc::new(std::cell::Cell::new(false)))
+      })
+      .collect();
+    let view = cx.entity().downgrade();
+    let error = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+    window.open_dialog(cx, move |dialog, _, _| {
+      let save_rows = rows.clone();
+      let save_view = view.clone();
+      let validation = error.clone();
+      let content = div().when(rows.is_empty(), |content| content.child(t("No bookmarks"))).when(!rows.is_empty(), |content| {
+        content.child(
+          div()
+            .id("bookmark-settings-scroll")
+            .max_h(px(390.))
+            .overflow_y_scroll()
+            .children(rows.iter().filter(|(_, _, _, removed)| !removed.get()).map(|(index, root, input, removed)| {
+              let removed = removed.clone();
+              div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .py_1()
+                .child(div().w(px(250.)).overflow_hidden().text_ellipsis().child(root.display().to_string()))
+                .child(div().flex_1().child(input.clone()))
+                .child(Button::new(("remove-bookmark", *index)).label(t("Remove")).small().on_click(move |_, window, _| {
+                  removed.set(true);
+                  window.refresh();
+                }))
+            })),
+        )
+      });
+      dialog
+        .title(t("Bookmark management"))
+        .confirm()
+        .w(px(760.))
+        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Save")))
+        .child(t("Edit paths relative to their repository root. Remove a row to delete its bookmark."))
+        .child(content)
+        .child(error.borrow().clone())
+        .on_ok(move |_, window, cx| {
+          let mut bookmarks = Vec::new();
+          for (_, root, input, removed) in &save_rows {
+            if removed.get() {
+              continue;
+            }
+            let path = PathBuf::from(input.read(cx).content.trim());
+            if path.as_os_str().is_empty() || path.is_absolute() || !root.join(&path).exists() {
+              *validation.borrow_mut() = tf("Enter an existing relative bookmark path: {path}", &[("path", path.display().to_string())]);
+              window.refresh();
+              return false;
+            }
+            bookmarks.push(settings::Bookmark { root: root.clone(), path });
+          }
+          save_view
+            .update(cx, |this, cx| {
+              let old = this.settings.bookmarks.clone();
+              this.settings.replace_bookmarks(bookmarks);
+              if !this.save_settings() {
+                this.settings.bookmarks = old;
+                *validation.borrow_mut() = this.notice.clone();
+                window.refresh();
+                return false;
+              }
+              this.error = false;
+              this.notice = t("Bookmarks updated.");
+              cx.notify();
+              true
+            })
+            .unwrap_or(false)
+        })
+    });
   }
 
   fn shortcuts_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {

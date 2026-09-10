@@ -1,17 +1,17 @@
-## 변경 사항
+## Changes
 
-- Pending changes를 가상 목록으로 전환하고 항상 표시되는 세로 스크롤바를 추가했습니다.
-- Ctrl/Cmd+A, Ctrl/Cmd+클릭, Shift+클릭으로 대기 중인 변경 파일을 다중 선택할 수 있습니다.
-- 선택 파일을 한 번에 되돌리고, 폴더 작업에는 하위 폴더 포함 범위를 선택하는 단계를 추가했습니다.
-- Obliterate는 명시적으로 활성화한 뒤 확인하도록 보강했습니다.
-- 명령 실행 중에는 진행 팝업과 애니메이션 진행 표시를 보여주며 배경 조작을 막습니다.
+- Converted Pending changes to a virtual list and added an always-visible vertical scrollbar.
+- Pending change files can now be selected with Ctrl/Cmd+A, Ctrl/Cmd-click, and Shift-click.
+- Added the ability to revert selected files at once, along with a step for choosing whether folder operations include subfolders.
+- Strengthened Obliterate by requiring explicit activation followed by confirmation.
+- Commands now show a progress dialog and animated progress indicator while running, preventing interaction with the background.
 
-## 다운로드
+## Downloads
 
-Windows x64: `LoreLens-0.1.4.msi`를 다운로드해 설치하세요. 파일 검증용 SHA256은 `SHA256SUMS.txt`에 있습니다.
+Windows x64: Download and install `LoreLens-0.1.4.msi`. The SHA256 checksum for verification is available in `SHA256SUMS.txt`.
 
-## 확인 및 제한 사항
+## Verification and Limitations
 
-- Release 빌드 및 MSI 생성 완료. 테스트 40개 통과, Lore CLI 통합 테스트 1개 제외.
-- MSI 설치 및 이전 버전에서의 업그레이드 테스트는 수행하지 않았습니다.
-- 진행 표시는 명령이 세부 진행률을 제공하지 않아 완료 비율 대신 실행 중임을 나타냅니다.
+- Release build and MSI generation completed. All 40 tests passed, with one Lore CLI integration test excluded.
+- MSI installation and upgrade testing from previous versions was not performed.
+- Because commands do not provide detailed progress, the progress indicator shows that a command is running rather than a completion percentage.
