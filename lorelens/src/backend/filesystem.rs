@@ -1,6 +1,68 @@
 use super::ignore::{load_loreignore, loreignored};
 use super::*;
 
+/// Validate configured text files before staging without modifying them.
+pub fn validate_text_files(root: &Path, paths: &[String], extensions: &[String], line_ending: &str, encoding: &str) -> Result<(), String> {
+  if extensions.is_empty() || (line_ending == "System" && encoding == "System") {
+    return Ok(());
+  }
+  let root = root.canonicalize().map_err(|e| e.to_string())?;
+  for relative in paths {
+    let relative = Path::new(relative);
+    if relative.is_absolute() || relative.components().any(|component| !matches!(component, std::path::Component::Normal(_))) {
+      return Err(format!("Invalid staging path: {}", relative.display()));
+    }
+    let path = root.join(relative);
+    let metadata = match fs::symlink_metadata(&path) {
+      Ok(metadata) => metadata,
+      Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+      Err(error) => return Err(format!("{}: {error}", path.display())),
+    };
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+      continue;
+    }
+    let Some(extension) = path.extension().and_then(|extension| extension.to_str()).map(str::to_ascii_lowercase) else {
+      continue;
+    };
+    if !extensions.iter().any(|configured| configured.eq_ignore_ascii_case(&extension)) {
+      continue;
+    }
+    let canonical = path.canonicalize().map_err(|e| format!("{}: {e}", path.display()))?;
+    if !canonical.starts_with(&root) {
+      return Err(format!("Staging path is outside the repository: {}", path.display()));
+    }
+    let bytes = fs::read(&canonical).map_err(|e| format!("{}: {e}", path.display()))?;
+    let valid_encoding = match encoding {
+      "UTF-8" => std::str::from_utf8(&bytes).is_ok(),
+      "UTF-8 no BOM" => !bytes.starts_with(&[0xef, 0xbb, 0xbf]) && std::str::from_utf8(&bytes).is_ok(),
+      _ => true,
+    };
+    if !valid_encoding {
+      return Err(crate::i18n::tf(
+        "Stage blocked: {path} does not match the required encoding {encoding}.",
+        &[("path", relative.display().to_string()), ("encoding", encoding.into())],
+      ));
+    }
+    let valid_line_ending = match line_ending {
+      "LF" => !bytes.contains(&b'\r'),
+      "CR" => !bytes.contains(&b'\n'),
+      "CRLF" => bytes.iter().enumerate().all(|(index, byte)| match byte {
+        b'\r' => bytes.get(index + 1) == Some(&b'\n'),
+        b'\n' => index > 0 && bytes[index - 1] == b'\r',
+        _ => true,
+      }),
+      _ => true,
+    };
+    if !valid_line_ending {
+      return Err(crate::i18n::tf(
+        "Stage blocked: {path} does not use the required {line_ending} line endings.",
+        &[("path", relative.display().to_string()), ("line_ending", line_ending.into())],
+      ));
+    }
+  }
+  Ok(())
+}
+
 /// Copy external entries without overwriting existing data or following links.
 pub fn copy_entries(root: &Path, destination: &Path, sources: &[PathBuf]) -> Result<usize, String> {
   fn metadata(path: &Path) -> Result<fs::Metadata, String> {
@@ -138,6 +200,40 @@ mod copy_tests {
     assert!(copy_entries(root.path(), outside.path(), &[folder.clone()]).is_err());
     fs::create_dir(root.path().join(".git")).unwrap();
     assert!(copy_entries(root.path(), &root.path().join(".git"), &[folder]).is_err());
+  }
+}
+
+#[cfg(test)]
+mod line_ending_tests {
+  use super::*;
+
+  #[test]
+  fn validates_only_configured_extensions_without_modifying_files() {
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir(root.path().join("nested")).unwrap();
+    fs::write(root.path().join("nested/text.txt"), b"first\r\nsecond\r\n").unwrap();
+    fs::write(root.path().join("ignored.rs"), b"keep\n").unwrap();
+
+    let paths = vec!["nested/text.txt".into(), "ignored.rs".into(), "deleted.txt".into()];
+    assert!(validate_text_files(root.path(), &paths, &["txt".into()], "CRLF", "UTF-8 no BOM").is_ok());
+    assert!(validate_text_files(root.path(), &paths, &["txt".into()], "LF", "UTF-8").is_err());
+    assert_eq!(fs::read(root.path().join("nested/text.txt")).unwrap(), b"first\r\nsecond\r\n");
+  }
+
+  #[test]
+  fn rejects_bom_and_invalid_utf8_when_requested() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("bom.txt"), b"\xef\xbb\xbftext\n").unwrap();
+    fs::write(root.path().join("invalid.txt"), [0xff]).unwrap();
+    assert!(validate_text_files(root.path(), &["bom.txt".into()], &["txt".into()], "System", "UTF-8").is_ok());
+    assert!(validate_text_files(root.path(), &["bom.txt".into()], &["txt".into()], "System", "UTF-8 no BOM").is_err());
+    assert!(validate_text_files(root.path(), &["invalid.txt".into()], &["txt".into()], "System", "UTF-8").is_err());
+  }
+
+  #[test]
+  fn rejects_paths_outside_the_repository() {
+    let root = tempfile::tempdir().unwrap();
+    assert!(validate_text_files(root.path(), &["../outside.txt".into()], &["txt".into()], "LF", "UTF-8").is_err());
   }
 }
 

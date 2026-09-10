@@ -2,6 +2,66 @@ use super::*;
 use gpui_component::scroll::ScrollableElement as _;
 
 impl Lens {
+  pub(super) fn resolve_or_diff(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
+    if self.busy || !self.connected {
+      return;
+    }
+    if !self.status.changes.iter().any(|change| change.path == path && change.conflict) || !backend::is_binary_merge(&self.root, &path) {
+      self.external_diff(path, cx);
+      return;
+    }
+    let root = self.root.clone();
+    let branch = self.status.branch.clone();
+    let view = cx.entity().downgrade();
+    window.open_dialog(cx, move |dialog, _, _| {
+      let mut choices = div().flex().gap_2();
+      for (id, label, side) in [
+        ("binary-base", "Mine (Base)", backend::BinarySide::Base),
+        ("binary-theirs", "Remote (Theirs)", backend::BinarySide::Theirs),
+      ] {
+        let view = view.clone();
+        let root = root.clone();
+        let branch = branch.clone();
+        let path = path.clone();
+        choices = choices.child(Button::new(id).label(t(label)).on_click(move |_, window, cx| {
+          window.close_dialog(cx);
+          let _ = view.update(cx, |this, cx| {
+            if this.busy || !this.connected || this.root != root || this.status.branch != branch || !this.status.changes.iter().any(|change| change.path == path && change.conflict) {
+              return;
+            }
+            this.busy = true;
+            this.preview.invalidate();
+            let root = root.clone();
+            let path = path.clone();
+            let task_path = path.clone();
+            let task = cx.background_executor().spawn(async move { backend::select_binary_merge(&root, &task_path, side) });
+            cx.spawn(async move |this, cx| {
+              let result = task.await;
+              let _ = this.update(cx, |this, cx| {
+                this.busy = false;
+                match result {
+                  Ok(()) => this.command(vec!["branch".into(), "merge".into(), "resolve".into(), "--".into(), path], "Resolve merge conflict", false, true, cx),
+                  Err(error) => {
+                    this.notice = error;
+                    this.error = true;
+                  }
+                }
+                cx.notify();
+              });
+            })
+            .detach();
+            cx.notify();
+          });
+        }));
+      }
+      dialog
+        .title(t("Resolve binary merge"))
+        .button_props(DialogButtonProps::default().ok_text(t("Cancel")))
+        .child(tf("Choose the file to overwrite {path}. Merge backups will be deleted after resolution.", &[("path", path.clone())]))
+        .child(choices)
+    });
+  }
+
   pub(super) fn theme_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let themes = gpui_component::ThemeRegistry::global(cx).sorted_themes();
     let light = themes.iter().filter(|theme| !theme.mode.is_dark()).map(|theme| theme.name.to_string()).collect::<Vec<_>>();

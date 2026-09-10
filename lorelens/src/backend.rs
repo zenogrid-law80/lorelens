@@ -1,7 +1,9 @@
+mod binary_merge;
 mod cli;
 mod filesystem;
 mod ignore;
 mod obliterate;
+pub use binary_merge::{BinarySide, is_binary_merge, select_binary_merge};
 pub fn list_tree(root: &Path, expanded: &std::collections::HashSet<PathBuf>) -> Result<Vec<Entry>, String> {
   fn walk(root: &Path, dir: &Path, expanded: &std::collections::HashSet<PathBuf>, result: &mut Vec<Entry>) -> Result<(), String> {
     for entry in list_directory(root, dir)? {
@@ -66,7 +68,7 @@ pub fn cleanup_resolved_merge(cli: &Path, root: &Path, relative: &str, identity:
 pub fn is_repository(root: &Path) -> bool {
   root.join(".lore").is_dir() || root.join(".urc").is_dir()
 }
-pub use filesystem::{copy_entries, delete_entry, list_directory, preview};
+pub use filesystem::{copy_entries, delete_entry, list_directory, preview, validate_text_files};
 
 use serde_json::Value;
 use std::{

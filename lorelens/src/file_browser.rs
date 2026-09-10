@@ -462,10 +462,10 @@ impl Lens {
                 menu = menu.item(
                   PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Resolve", "diff"))
                     .disabled(!bulk_enabled)
-                    .on_click(move |_, _, cx| {
+                    .on_click(move |_, window, cx| {
                       let _ = resolve_view.update(cx, |this, cx| {
                         if this.root == resolve_root && this.status.changes.iter().any(|change| change.path == resolve_path && change.conflict) {
-                          this.external_diff(resolve_path.clone(), cx);
+                          this.resolve_or_diff(resolve_path.clone(), window, cx);
                         }
                       });
                     }),

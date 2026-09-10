@@ -1,6 +1,20 @@
 {
   "Keyboard shortcuts": "Keyboard shortcuts",
   "Options": "Options",
+  "Line endings: {selected}": "Line endings: {selected}",
+  "Encoding: {selected}": "Encoding: {selected}",
+  "System": "System",
+  "LF": "LF",
+  "CR": "CR",
+  "CRLF": "CRLF",
+  "UTF-8": "UTF-8",
+  "UTF-8 no BOM": "UTF-8 no BOM",
+  "Manage text file extensions…": "Manage text file extensions…",
+  "Text file extensions": "Text file extensions",
+  "Extensions": "Extensions",
+  "Enter extensions separated by commas, without wildcards. Only these files are checked before staging.": "Enter extensions separated by commas, without wildcards. Only these files are checked before staging.",
+  "Stage blocked: {path} does not match the required encoding {encoding}.": "Stage blocked: {path} does not match the required encoding {encoding}.",
+  "Stage blocked: {path} does not use the required {line_ending} line endings.": "Stage blocked: {path} does not use the required {line_ending} line endings.",
   "Custom tool…": "Custom tool…",
   "Custom diff / merge tool": "Custom diff / merge tool",
   "Application name": "Application name",
@@ -308,5 +322,10 @@
   "No matching changes.": "No matching changes.",
   "Copy selected full paths": "Copy selected full paths",
   "Stage selected": "Stage selected",
-  "Unstage selected": "Unstage selected"
+  "Unstage selected": "Unstage selected",
+  "Resolve binary merge": "Resolve binary merge",
+  "Mine (Base)": "Mine (Base)",
+  "Remote (Theirs)": "Remote (Theirs)",
+  "Choose the file to overwrite {path}. Merge backups will be deleted after resolution.": "Choose the file to overwrite {path}. Merge backups will be deleted after resolution.",
+  "Binary merge inputs have changed. Try resolving again.": "Binary merge inputs have changed. Try resolving again."
 }

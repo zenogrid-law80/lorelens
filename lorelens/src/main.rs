@@ -539,7 +539,7 @@ impl Lens {
   fn file_command(&mut self, command: &str, window: &mut Window, cx: &mut Context<Self>) {
     if command == "diff" {
       if let Some(path) = self.selection.current.clone() {
-        self.external_diff(path, cx);
+        self.resolve_or_diff(path, window, cx);
       }
       return;
     }

@@ -1,6 +1,20 @@
 {
   "Keyboard shortcuts": "단축키",
   "Options": "옵션",
+  "Line endings: {selected}": "줄바꿈: {selected}",
+  "Encoding: {selected}": "인코딩: {selected}",
+  "System": "시스템",
+  "LF": "LF",
+  "CR": "CR",
+  "CRLF": "CRLF",
+  "UTF-8": "UTF-8",
+  "UTF-8 no BOM": "UTF-8 BOM 없음",
+  "Manage text file extensions…": "텍스트 파일 확장자 관리…",
+  "Text file extensions": "텍스트 파일 확장자",
+  "Extensions": "확장자",
+  "Enter extensions separated by commas, without wildcards. Only these files are checked before staging.": "와일드카드 없이 확장자를 쉼표로 구분해 입력하세요. 해당 파일만 스테이지 전에 검사합니다.",
+  "Stage blocked: {path} does not match the required encoding {encoding}.": "스테이지 중단: {path} 파일의 인코딩이 필수 설정 {encoding}과(와) 일치하지 않습니다.",
+  "Stage blocked: {path} does not use the required {line_ending} line endings.": "스테이지 중단: {path} 파일이 필수 {line_ending} 줄바꿈을 사용하지 않습니다.",
   "Custom tool…": "사용자 정의 도구…",
   "Custom diff / merge tool": "사용자 정의 비교 / 병합 도구",
   "Application name": "앱 이름",
@@ -308,5 +322,10 @@
   "No matching changes.": "일치하는 변경 사항이 없습니다.",
   "Copy selected full paths": "선택한 전체 경로 복사",
   "Stage selected": "선택 항목 스테이지",
-  "Unstage selected": "선택 항목 스테이지 해제"
+  "Unstage selected": "선택 항목 스테이지 해제",
+  "Resolve binary merge": "바이너리 병합 해결",
+  "Mine (Base)": "내 파일 (Base)",
+  "Remote (Theirs)": "원격 파일 (Theirs)",
+  "Choose the file to overwrite {path}. Merge backups will be deleted after resolution.": "{path}에 덮어쓸 파일을 선택하세요. 해결 후 병합 백업 파일이 삭제됩니다.",
+  "Binary merge inputs have changed. Try resolving again.": "바이너리 병합 입력 파일이 변경되었습니다. 다시 해결해 주세요."
 }

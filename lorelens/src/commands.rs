@@ -118,6 +118,9 @@ impl Lens {
     let expanded = self.expanded_folders.clone();
     let title = title.to_string();
     let identity = self.settings.identity.clone();
+    let text_line_ending = self.settings.text_line_ending.clone();
+    let text_encoding = self.settings.text_encoding.clone();
+    let text_extensions = self.settings.text_extensions.clone();
     let kind = CommandKind::from_args(&args);
     let authentication = kind.is_authentication();
     let login = kind == CommandKind::Login;
@@ -127,6 +130,12 @@ impl Lens {
       let result = (|| {
         let mut outputs = Vec::new();
         for args in commands {
+          if args.first().is_some_and(|arg| arg == "stage") {
+            let separator = args.iter().position(|arg| arg == "--").map_or(1, |index| index + 1);
+            if let Err(error) = backend::validate_text_files(&root, &args[separator..], &text_extensions, &text_line_ending, &text_encoding) {
+              return Err(format!("[stage-validation] {error}"));
+            }
+          }
           match backend::run_as(&cli, &root, &args, status || authentication || branches, if login { None } else { identity.as_deref() }) {
             Ok(output) => {
               outputs.push(output);
@@ -302,6 +311,8 @@ impl Lens {
             }
           }
           Err(e) => {
+            let validation = e.strip_prefix("[stage-validation] ").map(str::to_owned);
+            let e = validation.clone().unwrap_or(e);
             if status {
               this.connected = false;
               this.status = Status::default();
@@ -310,7 +321,7 @@ impl Lens {
               this.logged_in_account = "Account unavailable".into();
             }
             this.error = true;
-            this.notice = "Command failed · see details".into();
+            this.notice = validation.unwrap_or_else(|| "Command failed · see details".into());
             this.output_title = tf("{title} failed", &[("title", t(&title))]);
             this.output = if e.contains("Invalid or expired authentication") {
               format!("{e}\n\nAuthentication expired. Run `lore login` for this repository, then refresh.")

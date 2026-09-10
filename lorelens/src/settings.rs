@@ -4,6 +4,12 @@ use std::{
   path::{Path, PathBuf},
 };
 
+const DEFAULT_TEXT_EXTENSIONS: &[&str] = &["h", "cpp", "hpp", "cc", "cs", "rs", "go", "rb", "py", "xml", "json", "txt", "ini"];
+
+fn default_text_extensions() -> Vec<String> {
+  DEFAULT_TEXT_EXTENSIONS.iter().map(|extension| (*extension).into()).collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Bookmark {
   pub root: PathBuf,
@@ -19,6 +25,9 @@ pub struct Settings {
   pub cli: Option<PathBuf>,
   pub theme: String,
   pub show_command_log: bool,
+  pub text_line_ending: String,
+  pub text_encoding: String,
+  pub text_extensions: Vec<String>,
   pub language: String,
   pub external_tool: String,
   pub tool_paths: std::collections::BTreeMap<String, PathBuf>,
@@ -47,6 +56,9 @@ impl Default for Settings {
       cli: None,
       theme: "System".into(),
       show_command_log: true,
+      text_line_ending: "LF".into(),
+      text_encoding: "UTF-8 no BOM".into(),
+      text_extensions: default_text_extensions(),
       language: "en-US".into(),
       external_tool: "idea".into(),
       tool_paths: Default::default(),
@@ -177,6 +189,15 @@ impl Settings {
       language: crate::i18n::normalize(data["language"].as_str().unwrap_or("en-US")).into(),
       theme: data["theme"].as_str().unwrap_or("System").to_string(),
       show_command_log: data["show_command_log"].as_bool().unwrap_or(true),
+      text_line_ending: match data["text_line_ending"].as_str().unwrap_or("LF") {
+        value @ ("LF" | "CR" | "CRLF") => value.into(),
+        _ => "LF".into(),
+      },
+      text_encoding: match data["text_encoding"].as_str().unwrap_or("UTF-8 no BOM") {
+        value @ ("UTF-8" | "UTF-8 no BOM") => value.into(),
+        _ => "UTF-8 no BOM".into(),
+      },
+      text_extensions: Self::normalize_extensions(serde_json::from_value(data.get("text_extensions").cloned().unwrap_or_else(|| json!(default_text_extensions())))?),
       external_tool: data["external_tool"]
         .as_str()
         .or_else(|| data["diff_tool"].as_str())
@@ -201,6 +222,18 @@ impl Settings {
 
   pub fn remember(&mut self, path: &Path) {
     self.recent = Self::normalized_recent(std::iter::once(path.to_path_buf()).chain(self.recent.iter().cloned()));
+  }
+
+  pub fn normalize_extensions(extensions: Vec<String>) -> Vec<String> {
+    let mut extensions: Vec<_> = extensions
+      .into_iter()
+      .flat_map(|value| value.split([',', ';']).map(str::to_owned).collect::<Vec<_>>())
+      .map(|value| value.trim().trim_start_matches('.').to_ascii_lowercase())
+      .filter(|value| !value.is_empty() && value.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '+')))
+      .collect();
+    extensions.sort();
+    extensions.dedup();
+    extensions
   }
 
   pub fn prune_recent(&mut self) -> bool {
@@ -311,7 +344,7 @@ impl Settings {
       .collect();
     serde_json::to_writer_pretty(
       &mut file,
-      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "custom_tool_name": self.custom_tool_name, "custom_tool_path": self.custom_tool_path, "custom_tool_arguments": self.custom_tool_arguments, "recent": Self::normalized_recent(self.recent.clone()), "bookmarks": bookmarks, "cli": self.cli, "theme": self.theme, "show_command_log": self.show_command_log, "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
+      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "custom_tool_name": self.custom_tool_name, "custom_tool_path": self.custom_tool_path, "custom_tool_arguments": self.custom_tool_arguments, "recent": Self::normalized_recent(self.recent.clone()), "bookmarks": bookmarks, "cli": self.cli, "theme": self.theme, "show_command_log": self.show_command_log, "text_line_ending": self.text_line_ending, "text_encoding": self.text_encoding, "text_extensions": Self::normalize_extensions(self.text_extensions.clone()), "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
     )?;
     file.sync_all()?;
     drop(file);
@@ -332,6 +365,26 @@ mod tests {
     settings.show_command_log = false;
     settings.save(&path).unwrap();
     assert!(!Settings::load(&path).unwrap().show_command_log);
+  }
+
+  #[test]
+  fn text_file_rules_survive_restart_and_use_requested_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    let defaults = Settings::load(&path).unwrap();
+    assert_eq!(defaults.text_line_ending, "LF");
+    assert_eq!(defaults.text_encoding, "UTF-8 no BOM");
+    assert_eq!(defaults.text_extensions, ["h", "cpp", "hpp", "cc", "cs", "rs", "go", "rb", "py", "xml", "json", "txt", "ini"]);
+
+    let mut settings = Settings::default();
+    settings.text_line_ending = "CRLF".into();
+    settings.text_encoding = "UTF-8 no BOM".into();
+    settings.text_extensions = vec![".RS".into(), "txt, rs".into()];
+    settings.save(&path).unwrap();
+    let restored = Settings::load(&path).unwrap();
+    assert_eq!(restored.text_line_ending, "CRLF");
+    assert_eq!(restored.text_encoding, "UTF-8 no BOM");
+    assert_eq!(restored.text_extensions, ["rs", "txt"]);
   }
 
   #[test]

@@ -1,6 +1,20 @@
 {
   "Keyboard shortcuts": "Keyboard shortcuts",
   "Options": "选项",
+  "Line endings: {selected}": "换行符：{selected}",
+  "Encoding: {selected}": "编码：{selected}",
+  "System": "系统",
+  "LF": "LF",
+  "CR": "CR",
+  "CRLF": "CRLF",
+  "UTF-8": "UTF-8",
+  "UTF-8 no BOM": "UTF-8 无 BOM",
+  "Manage text file extensions…": "管理文本文件扩展名…",
+  "Text file extensions": "文本文件扩展名",
+  "Extensions": "扩展名",
+  "Enter extensions separated by commas, without wildcards. Only these files are checked before staging.": "请用逗号分隔扩展名，不要使用通配符。暂存前仅检查这些文件。",
+  "Stage blocked: {path} does not match the required encoding {encoding}.": "暂存已阻止：{path} 不符合所需的 {encoding} 编码。",
+  "Stage blocked: {path} does not use the required {line_ending} line endings.": "暂存已阻止：{path} 未使用所需的 {line_ending} 换行符。",
   "Custom tool…": "自定义工具…",
   "Custom diff / merge tool": "自定义比较 / 合并工具",
   "Application name": "应用名称",
@@ -308,5 +322,10 @@
   "No matching changes.": "没有匹配的更改。",
   "Copy selected full paths": "复制所选完整路径",
   "Stage selected": "暂存所选项",
-  "Unstage selected": "取消暂存所选项"
+  "Unstage selected": "取消暂存所选项",
+  "Resolve binary merge": "解决二进制合并冲突",
+  "Mine (Base)": "我的文件 (Base)",
+  "Remote (Theirs)": "远程文件 (Theirs)",
+  "Choose the file to overwrite {path}. Merge backups will be deleted after resolution.": "选择用于覆盖 {path} 的文件。解决冲突后将删除合并备份文件。",
+  "Binary merge inputs have changed. Try resolving again.": "二进制合并输入文件已更改。请重新解决冲突。"
 }

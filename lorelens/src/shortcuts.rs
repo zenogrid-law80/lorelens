@@ -232,6 +232,8 @@ impl Lens {
     let selected_label = if selected == "custom" { self.settings.custom_tool_name.clone() } else { selected.clone() };
     let custom_selected = selected == "custom";
     let obliterate_enabled = self.obliterate_enabled;
+    let line_ending = self.settings.text_line_ending.clone();
+    let encoding = self.settings.text_encoding.clone();
     let ready = !self.busy;
     Button::new("options-menu").label(format!("{} ▾", t("Options"))).dropdown_menu(move |menu, window, cx| {
       let selection_view = view.clone();
@@ -259,6 +261,42 @@ impl Lens {
       let cli_view = view.clone();
       let menu = menu.item(PopupMenuItem::new(t("Locate Lore CLI…")).on_click(move |_, _, cx| {
         let _ = cli_view.update(cx, |this, cx| this.choose(true, cx));
+      }));
+      let line_ending_view = view.clone();
+      let current_line_ending = line_ending.clone();
+      let menu = menu
+        .separator()
+        .submenu(tf("Line endings: {selected}", &[("selected", line_ending.clone())]), window, cx, move |mut menu, _, _| {
+          for value in ["System", "LF", "CR", "CRLF"] {
+            let view = line_ending_view.clone();
+            menu = menu.item(PopupMenuItem::new(t(value)).checked(value == current_line_ending).on_click(move |_, _, cx| {
+              let _ = view.update(cx, |this, cx| {
+                this.settings.text_line_ending = value.into();
+                this.save_settings();
+                cx.notify();
+              });
+            }));
+          }
+          menu
+        });
+      let encoding_view = view.clone();
+      let current_encoding = encoding.clone();
+      let menu = menu.submenu(tf("Encoding: {selected}", &[("selected", encoding.clone())]), window, cx, move |mut menu, _, _| {
+        for value in ["System", "UTF-8", "UTF-8 no BOM"] {
+          let view = encoding_view.clone();
+          menu = menu.item(PopupMenuItem::new(t(value)).checked(value == current_encoding).on_click(move |_, _, cx| {
+            let _ = view.update(cx, |this, cx| {
+              this.settings.text_encoding = value.into();
+              this.save_settings();
+              cx.notify();
+            });
+          }));
+        }
+        menu
+      });
+      let extensions_view = view.clone();
+      let menu = menu.item(PopupMenuItem::new(t("Manage text file extensions…")).on_click(move |_, window, cx| {
+        let _ = extensions_view.update(cx, |this, cx| this.text_extensions_dialog(window, cx));
       }));
       let locate_view = view.clone();
       let path_view = view.clone();
@@ -303,6 +341,35 @@ impl Lens {
           let _ = settings_view.update(cx, |this, cx| this.shortcuts_dialog(window, cx));
         }))
     })
+  }
+
+  fn text_extensions_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let extensions = cx.new(|cx| TextInput::new("Extensions", cx));
+    extensions.update(cx, |input, _| input.content = self.settings.text_extensions.join(", ").into());
+    let view = cx.entity().downgrade();
+    window.open_dialog(cx, move |dialog, _, _| {
+      let extensions_input = extensions.clone();
+      let view = view.clone();
+      dialog
+        .title(t("Text file extensions"))
+        .close_button(false)
+        .overlay_closable(false)
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Save")))
+        .child(t("Extensions"))
+        .child(extensions.clone())
+        .child(t("Enter extensions separated by commas, without wildcards. Only these files are checked before staging."))
+        .on_ok(move |_, _, cx| {
+          let values = settings::Settings::normalize_extensions(vec![extensions_input.read(cx).content.to_string()]);
+          view
+            .update(cx, |this, cx| {
+              this.settings.text_extensions = values;
+              let saved = this.save_settings();
+              cx.notify();
+              saved
+            })
+            .unwrap_or(false)
+        })
+    });
   }
 
   fn bookmarks_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
