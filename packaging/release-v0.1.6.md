@@ -13,7 +13,7 @@ Download `LoreLens-0.1.6.msi` for Windows x64. Install the Lore CLI separately u
 This free public build is not code-signed, so Windows may display an unknown publisher or Microsoft Defender SmartScreen warning. Download the installer only from this GitHub release and verify its SHA-256 checksum before running it:
 
 ```text
-b3fcdfdb985a8a55233fc846aedf9083115c424f7f9c2d41959d25fcf2157894  LoreLens-0.1.6.msi
+e7f83de07f7920107c9e045b301756973745424ffc275ddbfbbb8e29f55f3674  LoreLens-0.1.6.msi
 ```
 
 ## Validation and Known Limitations
