@@ -1,4 +1,6 @@
 {
+  "Auto refresh (30s)": "자동 갱신 (30초)",
+  "Refresh ({seconds}s)": "새로고침 ({seconds}초)",
   "Keyboard shortcuts": "단축키",
   "Options": "옵션",
   "Line endings: {selected}": "줄바꿈: {selected}",
@@ -116,8 +118,6 @@
   "Signed in: {account}": "로그인 계정: {account}",
   "Diff / Merge: {selected}": "비교 / 병합: {selected}",
   "Locate Lore CLI…": "Lore CLI 위치 지정…",
-  "Locate executable…": "실행 파일 위치 지정…",
-  "Use PATH": "PATH 사용",
   "Select {tool} executable": "{tool} 실행 파일 선택",
   "Select a valid executable file (.exe or .com on Windows).": "올바른 실행 파일을 선택하세요(Windows: .exe 또는 .com).",
   "Saved {tool}: {path}": "{tool} 저장됨: {path}",

@@ -1,4 +1,6 @@
 {
+  "Auto refresh (30s)": "Auto refresh (30s)",
+  "Refresh ({seconds}s)": "Refresh ({seconds}s)",
   "Keyboard shortcuts": "Keyboard shortcuts",
   "Options": "Options",
   "Line endings: {selected}": "Line endings: {selected}",
@@ -116,8 +118,6 @@
   "Signed in: {account}": "Signed in: {account}",
   "Diff / Merge: {selected}": "Diff / Merge: {selected}",
   "Locate Lore CLI…": "Locate Lore CLI…",
-  "Locate executable…": "Locate executable…",
-  "Use PATH": "Use PATH",
   "Select {tool} executable": "Select {tool} executable",
   "Select a valid executable file (.exe or .com on Windows).": "Select a valid executable file (.exe or .com on Windows).",
   "Saved {tool}: {path}": "Saved {tool}: {path}",

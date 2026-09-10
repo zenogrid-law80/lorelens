@@ -230,12 +230,23 @@ impl Lens {
     let view = cx.entity().downgrade();
     let selected = self.settings.external_tool.clone();
     let selected_label = if selected == "custom" { self.settings.custom_tool_name.clone() } else { selected.clone() };
-    let custom_selected = selected == "custom";
     let obliterate_enabled = self.obliterate_enabled;
+    let auto_refresh = self.settings.auto_refresh;
     let line_ending = self.settings.text_line_ending.clone();
     let encoding = self.settings.text_encoding.clone();
     let ready = !self.busy;
     Button::new("options-menu").label(format!("{} ▾", t("Options"))).dropdown_menu(move |menu, window, cx| {
+      let refresh_view = view.clone();
+      let menu = menu
+        .item(PopupMenuItem::new(t("Auto refresh (30s)")).checked(auto_refresh).on_click(move |_, _, cx| {
+          let _ = refresh_view.update(cx, |this, cx| {
+            this.settings.auto_refresh = !this.settings.auto_refresh;
+            this.next_refresh = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            this.save_settings();
+            cx.notify();
+          });
+        }))
+        .separator();
       let selection_view = view.clone();
       let current = selected.clone();
       let menu = menu.submenu(tf("Diff / Merge: {selected}", &[("selected", selected_label.clone())]), window, cx, move |mut menu, _, _| {
@@ -298,29 +309,9 @@ impl Lens {
       let menu = menu.item(PopupMenuItem::new(t("Manage text file extensions…")).on_click(move |_, window, cx| {
         let _ = extensions_view.update(cx, |this, cx| this.text_extensions_dialog(window, cx));
       }));
-      let locate_view = view.clone();
-      let path_view = view.clone();
       let obliterate_view = view.clone();
       let view = view.clone();
       let menu = menu
-        .separator()
-        .item(PopupMenuItem::new(t("Locate executable…")).on_click(move |_, _, cx| {
-          let _ = locate_view.update(cx, |this, cx| {
-            let tool = this.settings.external_tool.clone();
-            this.choose_tool(tool, None, cx);
-          });
-        }))
-        .item(PopupMenuItem::new(t("Use PATH")).disabled(custom_selected).on_click(move |_, _, cx| {
-          let _ = path_view.update(cx, |this, cx| {
-            let tool = this.settings.external_tool.clone();
-            this.settings.tool_paths.remove(&tool);
-            this.save_settings();
-            if external_tools::resolve(&tool, None).is_none() {
-              this.choose_tool(tool, None, cx);
-            }
-            cx.notify();
-          });
-        }))
         .separator()
         .item(PopupMenuItem::new(t("Obliterate")).checked(obliterate_enabled).disabled(!ready).on_click(move |_, _, cx| {
           let _ = obliterate_view.update(cx, |this, cx| {
@@ -354,7 +345,7 @@ impl Lens {
         .title(t("Text file extensions"))
         .close_button(false)
         .overlay_closable(false)
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Save")))
+        .footer(dialog_footer("text-extensions-save", t("Save"), true))
         .child(t("Extensions"))
         .child(extensions.clone())
         .child(t("Enter extensions separated by commas, without wildcards. Only these files are checked before staging."))
@@ -420,7 +411,7 @@ impl Lens {
         .close_button(false)
         .overlay_closable(false)
         .w(px(760.))
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Save")))
+        .footer(dialog_footer("bookmarks-save", t("Save"), true))
         .child(t("Edit paths relative to their repository root. Remove a row to delete its bookmark."))
         .child(content)
         .child(error.borrow().clone())
@@ -481,7 +472,7 @@ impl Lens {
         .close_button(false)
         .overlay_closable(false)
         .w(px(680.))
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Save")))
+        .footer(dialog_footer("shortcuts-save", t("Save"), true))
         .child(t("Enter a shortcut such as Ctrl+Shift+G. Leave blank to unassign."))
         .child(t(
           "Shortcuts use Lore's stage, commit, sync, and push workflow. Delete and revert keep their existing confirmation steps.",

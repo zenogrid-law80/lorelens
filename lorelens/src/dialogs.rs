@@ -56,7 +56,7 @@ impl Lens {
       }
       dialog
         .title(t("Resolve binary merge"))
-        .button_props(DialogButtonProps::default().ok_text(t("Cancel")))
+        .footer(dialog_footer("resolve-binary-cancel", t("Cancel"), false))
         .child(tf("Choose the file to overwrite {path}. Merge backups will be deleted after resolution.", &[("path", path.clone())]))
         .child(choices)
     });
@@ -104,7 +104,7 @@ impl Lens {
       dialog
         .title(t("Choose theme"))
         .w(px(520.))
-        .button_props(DialogButtonProps::default().ok_text(t("Close")))
+        .footer(dialog_footer("theme-close", t("Close"), false))
         .child(
           Button::new("system-theme")
             .label(if current == "System" { format!("✓ {system_label}") } else { system_label })
@@ -173,7 +173,7 @@ impl Lens {
         .title(t("Custom diff / merge tool"))
         .close_button(false)
         .overlay_closable(false)
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Save")))
+        .footer(dialog_footer("custom-tool-save", t("Save"), true))
         .child(t("Application name"))
         .child(name.clone())
         .child(t("Application location"))
@@ -268,7 +268,7 @@ impl Lens {
         .title(t("Unpushed local commits"))
         .close_button(false)
         .overlay_closable(false)
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Discard all unpushed commits")))
+        .footer(dialog_footer("discard-local-commits", t("Discard all unpushed commits"), true))
         .child(
           div()
             .flex()
@@ -376,7 +376,7 @@ impl Lens {
         .title(t(title))
         .close_button(false)
         .overlay_closable(false)
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t(title)))
+        .footer(dialog_footer("folder-changes-confirm", t(title), true))
         .child(
           div()
             .flex()
@@ -476,7 +476,7 @@ impl Lens {
             let validation = validation.clone();
             let error = t(&validation.borrow());
             dialog.title(t("Obliterate file")).close_button(false).overlay_closable(false)
-                .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Obliterate")))
+                .footer(dialog_footer("obliterate-confirm", t("Obliterate"), true))
                 .child(div().flex().flex_col().gap_2()
                     .child(root.display().to_string())
                     .child(tf("{count} items selected", &[("count", paths.len().to_string())]))
@@ -541,7 +541,7 @@ impl Lens {
         .title(t("Create repository"))
         .close_button(false)
         .overlay_closable(false)
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Create")))
+        .footer(dialog_footer("create-repository-confirm", t("Create"), true))
         .child(
           div()
             .flex()
@@ -664,7 +664,7 @@ impl Lens {
         .title(t(title))
         .close_button(false)
         .overlay_closable(false)
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t(title)))
+        .footer(dialog_footer("revert-confirm", t(title), true))
         .child(
           div()
             .flex()
@@ -737,7 +737,7 @@ impl Lens {
         .title(t("Delete"))
         .close_button(false)
         .overlay_closable(false)
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Delete")))
+        .footer(dialog_footer("delete-confirm", t("Delete"), true))
         .child(
           div()
             .flex()
@@ -817,7 +817,7 @@ impl Lens {
         .title(t("Logout"))
         .close_button(false)
         .overlay_closable(false)
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Logout")))
+        .footer(dialog_footer("logout-confirm", t("Logout"), true))
         .child(t("Log out all Lore CLI accounts on this device? URL history and local repositories will be kept."))
         .on_ok(move |_, _, cx| {
           view
@@ -855,7 +855,7 @@ impl Lens {
         .title(t("Login"))
         .close_button(false)
         .overlay_closable(false)
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Login")))
+        .footer(dialog_footer("login-submit", t("Login"), true))
         .child(
           div()
             .flex()
@@ -916,7 +916,7 @@ impl Lens {
         .title(t("Merge local branch"))
         .close_button(false)
         .overlay_closable(false)
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Merge")))
+        .footer(dialog_footer("merge-branch-confirm", t("Merge"), true))
         .child(tf("Target (current branch): {target}", &[("target", target.to_string())]))
         .child(t("Source branch"))
         .child(Self::history_input("merge-source-branch", name.clone(), branches.clone()))
@@ -960,7 +960,7 @@ impl Lens {
         .title(t("Switch local branch"))
         .close_button(false)
         .overlay_closable(false)
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Switch")))
+        .footer(dialog_footer("switch-branch-confirm", t("Switch"), true))
         .child(Self::history_input("switch-local-branch", name.clone(), branches.clone()))
         .on_ok(move |_, _, cx| {
           let branch = input.read(cx).content.trim().to_string();
@@ -996,7 +996,7 @@ impl Lens {
         .title(t(title))
         .close_button(false)
         .overlay_closable(false)
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Create")))
+        .footer(dialog_footer("new-branch-confirm", t("Create"), true))
         .child(t("Branch name"))
         .child(name.clone())
         .child(if remote {
@@ -1073,7 +1073,7 @@ impl Lens {
         .title(t("Move"))
         .close_button(false)
         .overlay_closable(false)
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Move")))
+        .footer(dialog_footer("move-confirm", t("Move"), true))
         .child(
           div()
             .flex()
@@ -1204,7 +1204,7 @@ impl Lens {
         .title(t("Clone repository"))
         .close_button(false)
         .overlay_closable(false)
-        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Clone")))
+        .footer(dialog_footer("clone-confirm", t("Clone"), true))
         .child(
           div()
             .flex()

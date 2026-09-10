@@ -192,7 +192,7 @@ pub fn diff(cli: &Path, root: &Path, relative: &str, revision: &str, identity: O
   }
   let mut child = command
     .spawn()
-    .map_err(|e| format!("Cannot start {}: {e}. Choose its executable using Locate executable in the tools menu.", tool.name))?;
+    .map_err(|e| format!("Cannot start {}: {e}. Check its executable path in Options > Diff / Merge.", tool.name))?;
   // IDE launchers can exit before an existing IDE opens the files. Retain snapshots.
   let _ = temporary.keep();
   std::thread::spawn(move || {

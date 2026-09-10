@@ -25,6 +25,7 @@ pub struct Settings {
   pub cli: Option<PathBuf>,
   pub theme: String,
   pub show_command_log: bool,
+  pub auto_refresh: bool,
   pub text_line_ending: String,
   pub text_encoding: String,
   pub text_extensions: Vec<String>,
@@ -56,6 +57,7 @@ impl Default for Settings {
       cli: None,
       theme: "System".into(),
       show_command_log: true,
+      auto_refresh: true,
       text_line_ending: "LF".into(),
       text_encoding: "UTF-8 no BOM".into(),
       text_extensions: default_text_extensions(),
@@ -189,6 +191,7 @@ impl Settings {
       language: crate::i18n::normalize(data["language"].as_str().unwrap_or("en-US")).into(),
       theme: data["theme"].as_str().unwrap_or("System").to_string(),
       show_command_log: data["show_command_log"].as_bool().unwrap_or(true),
+      auto_refresh: data["auto_refresh"].as_bool().unwrap_or(true),
       text_line_ending: match data["text_line_ending"].as_str().unwrap_or("LF") {
         value @ ("LF" | "CR" | "CRLF") => value.into(),
         _ => "LF".into(),
@@ -344,7 +347,7 @@ impl Settings {
       .collect();
     serde_json::to_writer_pretty(
       &mut file,
-      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "custom_tool_name": self.custom_tool_name, "custom_tool_path": self.custom_tool_path, "custom_tool_arguments": self.custom_tool_arguments, "recent": Self::normalized_recent(self.recent.clone()), "bookmarks": bookmarks, "cli": self.cli, "theme": self.theme, "show_command_log": self.show_command_log, "text_line_ending": self.text_line_ending, "text_encoding": self.text_encoding, "text_extensions": Self::normalize_extensions(self.text_extensions.clone()), "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
+      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "custom_tool_name": self.custom_tool_name, "custom_tool_path": self.custom_tool_path, "custom_tool_arguments": self.custom_tool_arguments, "recent": Self::normalized_recent(self.recent.clone()), "bookmarks": bookmarks, "cli": self.cli, "theme": self.theme, "show_command_log": self.show_command_log, "auto_refresh": self.auto_refresh, "text_line_ending": self.text_line_ending, "text_encoding": self.text_encoding, "text_extensions": Self::normalize_extensions(self.text_extensions.clone()), "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
     )?;
     file.sync_all()?;
     drop(file);
@@ -355,6 +358,22 @@ impl Settings {
 #[cfg(test)]
 mod tests {
   use super::*;
+  #[test]
+  fn auto_refresh_survives_restart_and_defaults_to_enabled() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    assert!(Settings::load(&path).unwrap().auto_refresh);
+    fs::write(&path, "{}").unwrap();
+    assert!(Settings::load(&path).unwrap().auto_refresh);
+
+    for enabled in [false, true] {
+      let mut settings = Settings::load(&path).unwrap();
+      settings.auto_refresh = enabled;
+      settings.save(&path).unwrap();
+      assert_eq!(Settings::load(&path).unwrap().auto_refresh, enabled);
+    }
+  }
+
   #[test]
   fn command_log_visibility_survives_restart_and_defaults_to_visible() {
     let dir = tempfile::tempdir().unwrap();

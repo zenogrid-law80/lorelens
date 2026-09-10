@@ -102,7 +102,7 @@ Files 또는 대기 중인 변경 목록에서 파일 우클릭 → **영구 제
 
 ## External diff and merge tools
 
-Choose `idea`, `p4merge`, or `TortoiseGitMerge` from Tools → Diff / Merge. The selected tool and executable path are shared by diff and merge operations and persist across launches. Use **Locate executable…** to set a path or **Use PATH** to clear it. Windows executables must be `.exe` or `.com`.
+Choose `idea`, `p4merge`, or `TortoiseGitMerge` from Options → Diff / Merge. The selected tool and executable path are shared by diff and merge operations and persist across launches. If the selected tool cannot be found, you will be prompted to locate its executable. Windows executables must be `.exe` or `.com`.
 
 Diff compares the current revision with a copy of the local file. Temporary comparison files remain in the OS temporary directory under `lorelens-diff-*` so existing IDE processes can open them. New files that do not exist in the current revision report an extraction error. Conflict-resolution merge execution is not yet connected.
 

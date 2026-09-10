@@ -28,7 +28,7 @@ use gpui_component::TitleBar;
 use gpui_component::{
   Root, WindowExt,
   button::Button,
-  dialog::DialogButtonProps,
+  dialog::{Cancel, Confirm, DialogFooter},
   menu::{ContextMenuExt, DropdownMenu, PopupMenuItem},
   resizable::{h_resizable, resizable_panel, v_resizable},
 };
@@ -58,6 +58,18 @@ fn canonicalize_path(path: PathBuf) -> PathBuf {
   canonical
 }
 
+fn dialog_footer(id: &'static str, ok_text: String, show_cancel: bool) -> DialogFooter {
+  DialogFooter::new()
+    .when(show_cancel, |footer| {
+      footer.child(Button::new("dialog-cancel").label(t("Cancel")).on_click(|_, window, cx| {
+        window.dispatch_action(Box::new(Cancel), cx);
+      }))
+    })
+    .child(Button::new(id).primary().label(ok_text).on_click(|_, window, cx| {
+      window.dispatch_action(Box::new(Confirm { secondary: false }), cx);
+    }))
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Tab {
   Files,
@@ -81,6 +93,7 @@ struct Lens {
   locked_paths: std::collections::HashSet<String>,
   connected: bool,
   busy: bool,
+  silent_refresh: bool,
   tab: Tab,
   selection: SelectionState,
   preview: PreviewState,
@@ -107,6 +120,8 @@ struct Lens {
   #[cfg(windows)]
   cli_install_pending: bool,
   refresh_pending: bool,
+  pending_refresh_silent: bool,
+  next_refresh: std::time::Instant,
   logged_in_account: String,
   pending_push: Result<Vec<backend::LocalCommit>, String>,
   pending_pull: Result<Vec<backend::LocalCommit>, String>,
@@ -268,6 +283,7 @@ impl Lens {
       let result = task.await;
       let _ = this.update(cx, |this, cx| {
         this.busy = false;
+        this.silent_refresh = false;
         match result {
           Ok(()) => {
             if merge && this.root == merge_root && this.status.branch == merge_branch {
@@ -311,7 +327,7 @@ impl Lens {
             pending_scroll: UniformListScrollHandle::new(),
             folder_to_select: None,
             directory: root.clone(), root, cli: settings.cli.clone().filter(|path| path.is_file()).unwrap_or_else(backend::find_cli), entries: vec![],
-            status: Status::default(), connected: false, busy: false, tab: Tab::Pending,
+            status: Status::default(), connected: false, busy: false, silent_refresh: false, tab: Tab::Pending,
             locked_paths: Default::default(),
             expanded_folders: Default::default(),
             selection: SelectionState::default(), preview: PreviewState::default(), output: "Open a folder to browse local files.\n\nFor version control, open a Lore repository and locate the Lore CLI.\nUse Sync to synchronize the current repository. Commits are not pushed automatically.".into(),
@@ -324,6 +340,8 @@ impl Lens {
             #[cfg(windows)]
             cli_install_pending: false,
             refresh_pending: false,
+            pending_refresh_silent: false,
+            next_refresh: std::time::Instant::now() + std::time::Duration::from_secs(30),
             logged_in_account: "Not signed in".into(),
             local_branches: Vec::new(),
             remote_branches: Vec::new(),
@@ -341,7 +359,28 @@ impl Lens {
         }
       });
       if this.refresh_pending && !this.busy {
-        this.refresh(cx);
+        this.refresh_with_mode(this.pending_refresh_silent, cx);
+      }
+    })
+    .detach();
+    cx.spawn(async move |this, cx| {
+      loop {
+        cx.background_executor().timer(std::time::Duration::from_secs(1)).await;
+        if this
+          .update(cx, |this, cx| {
+            if !this.connected || !this.settings.auto_refresh {
+              this.next_refresh = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            } else if !this.busy && std::time::Instant::now() >= this.next_refresh {
+              this.refresh_with_mode(true, cx);
+            }
+            if this.connected && this.settings.auto_refresh {
+              cx.notify();
+            }
+          })
+          .is_err()
+        {
+          break;
+        }
       }
     })
     .detach();
@@ -961,7 +1000,7 @@ fn main() {
           cx.observe_window_activation(window, move |this, window, cx| {
             let active = window.is_window_active();
             if active && !was_active {
-              this.refresh(cx);
+              this.refresh_with_mode(true, cx);
             }
             was_active = active;
           })

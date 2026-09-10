@@ -1,4 +1,6 @@
 {
+  "Auto refresh (30s)": "自动刷新（30秒）",
+  "Refresh ({seconds}s)": "刷新（{seconds}秒）",
   "Keyboard shortcuts": "Keyboard shortcuts",
   "Options": "选项",
   "Line endings: {selected}": "换行符：{selected}",
@@ -116,8 +118,6 @@
   "Signed in: {account}": "已登录：{account}",
   "Diff / Merge: {selected}": "差异 / 合并：{selected}",
   "Locate Lore CLI…": "指定 Lore CLI 路径…",
-  "Locate executable…": "指定可执行文件…",
-  "Use PATH": "使用 PATH",
   "Select {tool} executable": "选择 {tool} 可执行文件",
   "Select a valid executable file (.exe or .com on Windows).": "请选择有效的可执行文件（Windows 上为 .exe 或 .com）。",
   "Saved {tool}: {path}": "已保存 {tool}：{path}",

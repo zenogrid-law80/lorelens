@@ -76,20 +76,29 @@ mod tests {
 
 impl Lens {
   pub(super) fn refresh(&mut self, cx: &mut Context<Self>) {
+    self.refresh_with_mode(false, cx);
+  }
+
+  pub(super) fn refresh_with_mode(&mut self, silent: bool, cx: &mut Context<Self>) {
     if self.root.as_os_str().is_empty() {
       return;
     }
     if self.busy {
+      self.pending_refresh_silent = silent && (!self.refresh_pending || self.pending_refresh_silent);
       self.refresh_pending = true;
       return;
     }
     self.refresh_pending = false;
+    self.pending_refresh_silent = false;
+    self.next_refresh = std::time::Instant::now() + std::time::Duration::from_secs(30);
     if !backend::is_repository(&self.root) {
       self.connected = false;
       self.load_directory(cx);
+      self.silent_refresh = silent && self.busy;
       return;
     }
     self.command(vec!["status".into(), "--scan".into()], "Repository status", true, false, cx);
+    self.silent_refresh = silent && self.busy;
   }
 
   pub(super) fn command(&mut self, args: Vec<String>, title: &str, status: bool, mutation: bool, cx: &mut Context<Self>) {
@@ -111,6 +120,7 @@ impl Lens {
     }
     self.preview.invalidate();
     self.busy = true;
+    self.silent_refresh = false;
     self.error = false;
     self.notice = tf("Running {command}…", &[("command", args.join(" "))]);
     self.log(format!("lore {}", args.join(" ")));
@@ -194,7 +204,9 @@ impl Lens {
         pending_pull,
       } = task.await;
       let _ = this.update(cx, |this, cx| {
+        let silent_refresh = this.silent_refresh;
         this.busy = false;
+        this.silent_refresh = false;
         if let Some(pending_pull) = pending_pull {
           this.pending_pull = pending_pull;
         }
@@ -259,6 +271,7 @@ impl Lens {
               this.branch_output = lines.join("\n");
               this.notice = "Branches loaded".into();
               this.command(vec!["auth".into(), "info".into()], "Account", false, false, cx);
+              this.silent_refresh = silent_refresh && this.busy;
             } else if kind == CommandKind::Logout {
               this.settings.identity = None;
               this.settings.login_remote = None;
@@ -305,6 +318,7 @@ impl Lens {
             }
             if status && this.connected {
               this.command(vec!["branch".into(), "list".into()], "Branches", false, false, cx);
+              this.silent_refresh = silent_refresh && this.busy;
             }
             if mutation {
               if kind.changes_worktree() {
@@ -343,6 +357,7 @@ impl Lens {
             this.log(e);
             if matches!(kind, CommandKind::Merge | CommandKind::Obliterate) {
               this.refresh_pending = true;
+              this.pending_refresh_silent = false;
             }
           }
         }
