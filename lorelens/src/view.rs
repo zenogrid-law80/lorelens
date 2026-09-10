@@ -12,14 +12,14 @@ impl Render for Lens {
         "?".into()
       }
     };
-    let sync_label = format!("{}  {} ↓", t("Sync"), sync_count(&self.pending_pull));
-    let push_label = format!("{}  {} ↑", t("Push"), sync_count(&self.pending_push));
+    let sync_label = format!("{}  {}", t("Sync"), sync_count(&self.pending_pull));
+    let push_label = format!("{}  {}", t("Push"), sync_count(&self.pending_push));
     let staged = self.status.changes.iter().filter(|c| c.staged).count();
     let has_logs = !self.logs.is_empty();
 
     let sidebar_visible = !self.root.as_os_str().is_empty();
-    let sidebar = div().size_full().flex().when(sidebar_visible, |d| d.child(self.render_file_browser(cx)));
-    let mut tabs = div().flex().gap_2().px_3().py_2().border_b_1().border_color(rgb(BORDER));
+    let sidebar = div().size_full().pr_1().flex().when(sidebar_visible, |d| d.child(self.render_file_browser(cx)));
+    let mut tabs = div().flex().flex_shrink_0().gap_2().px_3().border_b_1().border_color(rgb(BORDER));
     for (id, label, tab) in [
       ("pending-tab", "Changes", Tab::Pending),
       ("history-tab", "History", Tab::History),
@@ -29,12 +29,15 @@ impl Render for Lens {
       tabs = tabs.child(
         div()
           .id(id)
+          .relative()
           .px_3()
-          .py_2()
-          .rounded_md()
+          .py_3()
           .cursor_pointer()
-          .bg(rgb(if self.tab == tab { Selected } else { PANEL }))
+          .text_color(rgb(if self.tab == tab { Accent } else { TEXT }))
+          .when(self.tab == tab, |tab| tab.font_weight(FontWeight::SEMIBOLD))
+          .hover(move |style| style.bg(rgb(Hover)))
           .child(t(label))
+          .when(self.tab == tab, |tab| tab.child(div().absolute().bottom_0().left_0().w_full().h(px(3.)).rounded_t_md().bg(rgb(Accent))))
           .on_click(cx.listener(move |this, _, _, cx| {
             if this.busy {
               return;
@@ -115,13 +118,40 @@ impl Render for Lens {
       );
     }
     if self.pending_visible.is_empty() {
-      pending = pending.child(div().p_6().text_color(rgb(MUTED)).child(t(if self.connected && !self.status.changes.is_empty() {
-        "No matching changes."
-      } else if self.connected {
-        "No pending changes. Refresh to scan for edits."
+      let (title, description) = if !self.connected {
+        ("Open a repository", "Open a Lore repository and Refresh to view pending changes.")
+      } else if self.busy {
+        ("Working…", "Scanning for changes…")
+      } else if self.error {
+        ("Changes unavailable", "Refresh to scan for changes. See the command log for details.")
+      } else if !self.status.changes.is_empty() {
+        ("No matching changes.", "Try a different filter to find your changes.")
       } else {
-        "Open a Lore repository and Refresh to view pending changes."
-      })));
+        ("Working tree clean", "Changes will appear here when Lore detects modified, added, or deleted files.")
+      };
+      pending = pending.child(
+        div()
+          .id("pending-empty-state")
+          .flex_1()
+          .min_h_0()
+          .overflow_y_scroll()
+          .flex()
+          .flex_col()
+          .items_center()
+          .justify_center()
+          .gap_2()
+          .p_4()
+          .text_center()
+          .child(Icon::new(IconName::FileText).size(px(36.)).text_color(rgb(MUTED)))
+          .child(div().mt_1().text_size(px(20.)).font_weight(FontWeight::SEMIBOLD).child(t(title)))
+          .when(title == "Working tree clean", |state| state.child(div().text_size(px(14.)).child(t("No pending changes"))))
+          .child(div().max_w(px(360.)).text_size(px(13.)).text_color(rgb(MUTED)).child(t(description)))
+          .child(
+            div()
+              .mt_2()
+              .child(self.button("empty-refresh", "Refresh", ready).on_click(cx.listener(|this, _, _, cx| this.refresh(cx)))),
+          ),
+      );
     }
     let lines = self
       .logs
@@ -152,7 +182,11 @@ impl Render for Lens {
       .flex()
       .flex_col()
       .min_h_0()
-      .border_t_1()
+      .size_full()
+      .rounded_lg()
+      .overflow_hidden()
+      .bg(rgb(BG))
+      .border_1()
       .border_color(rgb(BORDER))
       .child(
         div()
@@ -160,9 +194,23 @@ impl Render for Lens {
           .items_center()
           .gap_3()
           .px_4()
-          .py_2()
+          .h(px(44.))
+          .flex_shrink_0()
+          .border_b_1()
+          .border_color(rgb(BORDER))
           .bg(rgb(PANEL))
-          .child(div().text_color(rgb(BLUE)).child(t("Command log")))
+          .child(
+            div()
+              .h_full()
+              .flex()
+              .items_center()
+              .px_1()
+              .border_b_2()
+              .border_color(rgb(Accent))
+              .font_weight(FontWeight::SEMIBOLD)
+              .text_color(rgb(Accent))
+              .child(t("Command log")),
+          )
           .child(
             div()
               .flex_1()
@@ -193,11 +241,16 @@ impl Render for Lens {
           .children(lines),
       );
     let upper_panel = div()
-      .flex_1()
+      .size_full()
       .min_w_0()
       .min_h_0()
       .flex()
       .flex_col()
+      .rounded_lg()
+      .border_1()
+      .border_color(rgb(BORDER))
+      .bg(rgb(PANEL))
+      .overflow_hidden()
       .child(tabs)
       .when(self.tab == Tab::Files, |d| {
         d.child(div().px_3().py_2().bg(rgb(PANEL)).child(self.preview.path.clone().unwrap_or_else(|| t("File preview")))).child(
@@ -206,7 +259,7 @@ impl Render for Lens {
             .flex_1()
             .min_h_0()
             .overflow_scroll()
-            .font_family("Consolas")
+            .font_family(gpui_component::Theme::global(cx).mono_font_family.clone())
             .text_size(px(12.))
             .p_3()
             .children(self.preview.content.lines().map(|line| div().min_h(px(20.)).child(line.to_string())).collect::<Vec<_>>()),
@@ -219,7 +272,7 @@ impl Render for Lens {
             .flex_1()
             .min_h_0()
             .overflow_scroll()
-            .font_family("Consolas")
+            .font_family(gpui_component::Theme::global(cx).mono_font_family.clone())
             .text_size(px(12.))
             .p_3()
             .children(self.output.lines().map(|line| div().min_h(px(20.)).child(line.to_string())).collect::<Vec<_>>()),
@@ -229,12 +282,26 @@ impl Render for Lens {
         d.child(
           div()
             .px_3()
-            .py_2()
+            .pt_3()
+            .pb_2()
+            .flex_shrink_0()
             .flex()
             .flex_col()
             .gap_2()
             .bg(rgb(PANEL))
-            .child(div().overflow_hidden().border_1().border_color(rgb(BORDER)).rounded_md().child(self.pending_filter.clone()))
+            .child(
+              div()
+                .flex()
+                .items_center()
+                .pl_3()
+                .bg(rgb(BG))
+                .overflow_hidden()
+                .border_1()
+                .border_color(rgb(BORDER))
+                .rounded_md()
+                .child(Icon::new(IconName::Search).size(px(16.)).text_color(rgb(MUTED)))
+                .child(div().flex_1().min_w_0().child(self.pending_filter.clone())),
+            )
             .child(
               div().flex().items_center().gap_2().text_size(px(12.)).child(
                 gpui_component::checkbox::Checkbox::new("select-visible-changes")
@@ -263,6 +330,12 @@ impl Render for Lens {
         .child(
           div()
             .relative()
+            .mx_2()
+            .mb_2()
+            .border_1()
+            .border_color(rgb(BORDER))
+            .rounded_lg()
+            .overflow_hidden()
             .flex_1()
             .min_h_0()
             .flex()
@@ -272,11 +345,11 @@ impl Render for Lens {
                 .flex()
                 .items_center()
                 .flex_shrink_0()
-                .h(px(29.))
+                .h(px(32.))
                 .pl_3()
                 .pr(px(24.))
                 .gap_2()
-                .bg(rgb(Hover))
+                .bg(rgb(Header))
                 .text_size(px(11.))
                 .text_color(rgb(MUTED))
                 .child(div().w(px(16.)).flex_shrink_0())
@@ -286,19 +359,44 @@ impl Render for Lens {
                 .child(div().w(px(110.)).flex_shrink_0().child(t("STATE"))),
             )
             .child(pending)
-            .child(gpui_component::scroll::Scrollbar::vertical(&self.pending_scroll).mode(gpui_component::scroll::ScrollbarMode::Always)),
+            .when(visible_count > 0, |list| {
+              list.child(gpui_component::scroll::Scrollbar::vertical(&self.pending_scroll).mode(gpui_component::scroll::ScrollbarMode::Always))
+            }),
         )
         .child(
           div()
-            .px_4()
-            .py_3()
+            .mx_2()
+            .mb_2()
+            .p_3()
             .flex()
+            .flex_wrap()
+            .flex_shrink_0()
             .items_center()
             .gap_3()
-            .border_t_1()
+            .rounded_lg()
+            .bg(rgb(Surface))
+            .border_1()
             .border_color(rgb(BORDER))
-            .child(div().text_size(px(11.)).text_color(rgb(MUTED)).child(tf("{count} staged", &[("count", staged.to_string())])))
-            .child(div().flex_1().min_w_0().overflow_hidden().rounded_md().border_1().border_color(rgb(BORDER)).child(self.message.clone()))
+            .child(
+              div().flex().items_center().gap_3().child(Icon::new(IconName::GitBranch).size(px(20.)).text_color(rgb(MUTED))).child(
+                div()
+                  .flex()
+                  .flex_col()
+                  .gap_1()
+                  .child(tf("{count} files staged", &[("count", staged.to_string())]))
+                  .child(div().text_size(px(11.)).text_color(rgb(MUTED)).child(t("Stage files to commit your changes."))),
+              ),
+            )
+            .child(
+              div()
+                .flex_1()
+                .min_w(px(160.))
+                .overflow_hidden()
+                .rounded_md()
+                .border_1()
+                .border_color(rgb(BORDER))
+                .child(self.message.clone()),
+            )
             .child(self.button("generate-message", "Generate message", vcs && staged > 0).on_click(cx.listener(|this, _, _, cx| {
               this.generate_commit_message(cx);
             })))
@@ -347,8 +445,8 @@ impl Render for Lens {
       });
     let right = if self.show_log && self.tab != Tab::Unpushed {
       v_resizable("content-command-log-split")
-        .child(resizable_panel().size_range(px(250.)..Pixels::MAX).child(upper_panel))
-        .child(resizable_panel().size(px(270.)).size_range(px(140.)..px(600.)).child(detail_panel))
+        .child(resizable_panel().size_range(px(320.)..Pixels::MAX).child(upper_panel))
+        .child(resizable_panel().size(px(270.)).size_range(px(140.)..px(600.)).child(div().size_full().pt_1().child(detail_panel)))
         .into_any_element()
     } else {
       upper_panel.into_any_element()
@@ -364,7 +462,7 @@ impl Render for Lens {
       .font_family(gpui_component::Theme::global(cx).font_family.clone())
       .text_size(px(13.))
       .child(
-        TitleBar::new().bg(rgb(PANEL)).border_color(rgb(BORDER)).child(
+        TitleBar::new().bg(rgb(Surface)).border_color(rgb(BORDER)).child(
           div()
             .h_full()
             .flex_1()
@@ -376,7 +474,7 @@ impl Render for Lens {
             .child(
               div()
                 .id("lorelens-home-link")
-                .text_size(px(13.))
+                .text_size(px(18.))
                 .px_2()
                 .flex()
                 .items_center()
@@ -389,7 +487,7 @@ impl Render for Lens {
                     cx.open_url("https://lorelens.zenogrid.co.kr/");
                   }
                 })
-                .child(gpui::img(crate::file_browser::favicon_image()).w(px(20.)).h(px(20.)).flex_shrink_0())
+                .child(Icon::default().data(include_bytes!("../assets/lorelens-mark.svg")).size(px(28.)).text_color(rgb(Accent)))
                 .child("LoreLens"),
             )
             .child(self.app_menu("Repository", false, cx))
@@ -414,22 +512,30 @@ impl Render for Lens {
           .child(
             self
               .button("refresh", "Refresh", ready)
+              .h(px(36.))
               .when(self.connected && self.settings.auto_refresh, |button| {
                 let seconds = self.next_refresh.saturating_duration_since(std::time::Instant::now()).as_secs_f64().ceil() as u64;
                 button.label(tf("Refresh ({seconds}s)", &[("seconds", seconds.to_string())]))
               })
               .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
           )
-          .child(self.button("sync", "Sync", vcs).label(sync_label).on_click(cx.listener(|this, _, _, cx| {
+          .child(self.button("sync", "Sync", vcs).h(px(36.)).label(sync_label).on_click(cx.listener(|this, _, _, cx| {
             if !this.busy && this.connected {
               this.command(vec!["sync".into()], "Sync", false, true, cx);
             }
           })))
-          .child(self.button("push", "Push", vcs).label(push_label).on_click(cx.listener(|this, _, _, cx| {
-            if !this.busy && this.connected {
-              this.command(vec!["push".into()], "Push", false, true, cx);
-            }
-          })))
+          .child(
+            self
+              .button("push", "Push", vcs)
+              .h(px(36.))
+              .text_color(rgb(Accent))
+              .label(push_label)
+              .on_click(cx.listener(|this, _, _, cx| {
+                if !this.busy && this.connected {
+                  this.command(vec!["push".into()], "Push", false, true, cx);
+                }
+              })),
+          )
           .child(div().flex_1())
           .child(div().text_size(px(11.)).text_color(rgb(MUTED)).child(if self.connected {
             tf("Revision {revision}", &[("revision", self.status.revision.to_string())])
@@ -463,7 +569,7 @@ impl Render for Lens {
           .child(div().flex().items_center().child(self.bookmark_toggle(cx)).child(self.bookmark_list(cx))),
       )
       .child(
-        div().flex().flex_1().min_h_0().child(
+        div().p_1().flex().flex_1().min_h_0().child(
           h_resizable("file-content-split")
             .child(resizable_panel().visible(sidebar_visible).size(px(320.)).size_range(px(220.)..px(600.)).child(sidebar))
             .child(resizable_panel().size_range(px(500.)..Pixels::MAX).child(right)),
@@ -471,7 +577,7 @@ impl Render for Lens {
       )
       .child(
         div()
-          .h(px(30.))
+          .h(px(36.))
           .flex_shrink_0()
           .px_4()
           .flex()
@@ -479,17 +585,18 @@ impl Render for Lens {
           .gap_3()
           .border_t_1()
           .border_color(rgb(BORDER))
+          .bg(rgb(Surface))
           .text_size(px(11.))
           .text_color(rgb(if self.error { Danger } else { MUTED }))
-          .child(if self.busy {
-            "◌"
+          .child(div().size(px(10.)).flex_shrink_0().rounded_full().bg(rgb(if self.busy {
+            Warning
           } else if self.error {
-            "!"
+            Danger
           } else {
-            "●"
-          })
+            Success
+          })))
           .child(div().flex_1().overflow_hidden().text_ellipsis().child(t(&self.notice)))
-          .child("Rust + GPUI · LoreLens"),
+          .child(concat!("Rust + GPUI · LoreLens v", env!("CARGO_PKG_VERSION"))),
       )
       .children(Root::render_dialog_layer(window, cx))
       .when(self.busy && !self.silent_refresh, |view| {
@@ -520,7 +627,7 @@ impl Render for Lens {
                 .child(t("Working…"))
                 .child(div().text_size(px(12.)).overflow_hidden().child(t(&self.notice)))
                 .child(div().relative().h(px(6.)).w_full().overflow_hidden().rounded_full().bg(rgb(BORDER)).child(
-                  div().absolute().h_full().w(relative(0.3)).rounded_full().bg(rgb(BLUE)).with_animation(
+                  div().absolute().h_full().w(relative(0.3)).rounded_full().bg(rgb(Accent)).with_animation(
                     "command-progress",
                     Animation::new(std::time::Duration::from_millis(1200)).repeat(),
                     |bar, delta| bar.left(relative(0.7 * (1. - (2. * delta - 1.).abs()))),

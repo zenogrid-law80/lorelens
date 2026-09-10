@@ -1,4 +1,5 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+mod assets;
 #[cfg(target_os = "macos")]
 mod macos;
 mod state;
@@ -24,6 +25,7 @@ use i18n::{t, tf};
 use backend::{Change, Entry, Status};
 use gpui::{div, prelude::*, px, *};
 use gpui_component::Disableable;
+use gpui_component::Icon;
 use gpui_component::TitleBar;
 use gpui_component::{
   Root, WindowExt,
@@ -33,6 +35,7 @@ use gpui_component::{
   resizable::{h_resizable, resizable_panel, v_resizable},
 };
 use gpui_component::{Sizable, button::ButtonVariants};
+use gpui_kit_assets::IconName;
 use input::TextInput;
 use std::{path::PathBuf, process::Command};
 
@@ -660,7 +663,24 @@ impl Lens {
   }
 
   fn button(&self, id: &'static str, label: &'static str, enabled: bool) -> Button {
-    Button::new(id).label(t(label)).small().disabled(!enabled).when(id == "commit", |button| button.primary())
+    let icon = match id {
+      "refresh" | "empty-refresh" => Some(IconName::RefreshCw),
+      "sync" => Some(IconName::ArrowDown),
+      "push" => Some(IconName::ArrowUp),
+      "commit" => Some(IconName::GitBranch),
+      "generate-message" => Some(IconName::Sparkles),
+      "copy" => Some(IconName::Copy),
+      "clear-command-log" => Some(IconName::Trash),
+      _ => None,
+    };
+    Button::new(id)
+      .label(t(label))
+      .small()
+      .h(px(34.))
+      .px_3()
+      .disabled(!enabled)
+      .when_some(icon, |button, icon| button.icon(icon))
+      .when(id == "commit", |button| button.primary())
   }
 
   fn pending_paths_valid(&self, paths: &[String], staged: Option<bool>) -> bool {
@@ -937,7 +957,7 @@ fn main() {
     .or_else(|| settings.restore())
     .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
   let root = canonicalize_path(root);
-  gpui_platform::application().with_assets(gpui_kit_assets::Assets).run(move |cx: &mut App| {
+  gpui_platform::application().with_assets(assets::Assets).run(move |cx: &mut App| {
     #[cfg(target_os = "macos")]
     macos::set_application_icon();
     gpui_component::init(cx);

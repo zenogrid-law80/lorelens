@@ -1,15 +1,22 @@
 use gpui::{App, Hsla, Window};
 use gpui_component::{Theme, ThemeMode, ThemeRegistry};
 
+pub(crate) const LIGHT_THEME: &str = "LoreLens Light";
+pub(crate) const DARK_THEME: &str = "LoreLens Dark";
+pub(crate) const DEFAULT_THEME: &str = LIGHT_THEME;
+
 #[derive(Clone, Copy)]
 #[allow(clippy::upper_case_acronyms)]
 pub(crate) enum ColorRole {
   BG,
   PANEL,
+  Sidebar,
   BORDER,
   TEXT,
   MUTED,
-  BLUE,
+  Accent,
+  Surface,
+  Header,
   Divider,
   Hover,
   Selected,
@@ -23,11 +30,14 @@ pub(crate) fn palette(cx: &App) -> impl Fn(ColorRole) -> Hsla + Copy + use<> {
   let colors = Theme::global(cx).colors;
   move |role| match role {
     ColorRole::BG => colors.background,
-    ColorRole::PANEL => colors.sidebar,
+    ColorRole::PANEL => colors.list,
+    ColorRole::Sidebar => colors.sidebar,
     ColorRole::BORDER | ColorRole::Divider => colors.border,
     ColorRole::TEXT => colors.foreground,
     ColorRole::MUTED => colors.muted_foreground,
-    ColorRole::BLUE => colors.primary,
+    ColorRole::Accent => colors.primary,
+    ColorRole::Surface => colors.title_bar,
+    ColorRole::Header => colors.table_head,
     ColorRole::Hover => colors.list_hover,
     ColorRole::Selected => colors.list_active,
     ColorRole::Success => colors.success,
@@ -74,8 +84,9 @@ pub(super) fn defer_theme(value: impl Into<String>, window: &Window, cx: &mut Ap
 }
 
 fn reset_default_themes(cx: &mut App) {
-  let light = ThemeRegistry::global(cx).default_light_theme().clone();
-  let dark = ThemeRegistry::global(cx).default_dark_theme().clone();
+  let registry = ThemeRegistry::global(cx);
+  let light = registry.themes().get(LIGHT_THEME).unwrap_or_else(|| registry.default_light_theme()).clone();
+  let dark = registry.themes().get(DARK_THEME).unwrap_or_else(|| registry.default_dark_theme()).clone();
   let theme = Theme::global_mut(cx);
   theme.light_theme = light;
   theme.dark_theme = dark;
@@ -96,5 +107,8 @@ mod tests {
         assert!(names.insert(theme.name.to_string()), "duplicate bundled theme: {}", theme.name);
       }
     }
+    assert!(names.contains(super::LIGHT_THEME), "the light default theme must be bundled");
+    assert!(names.contains(super::DARK_THEME), "the dark default theme must be bundled");
+    assert!(names.contains(super::DEFAULT_THEME), "the default theme must be bundled");
   }
 }

@@ -407,7 +407,7 @@ impl Element for TextElement {
     let style = window.text_style();
 
     let (display_text, text_color) = if content.is_empty() {
-      (crate::i18n::t(&input.placeholder).into(), hsla(0.6, 0.1, 0.65, 1.0))
+      (crate::i18n::t(&input.placeholder).into(), gpui_component::Theme::global(cx).muted_foreground)
     } else {
       (content, style.color)
     };
@@ -456,7 +456,7 @@ impl Element for TextElement {
         None,
         Some(fill(
           Bounds::new(point(bounds.left() + cursor_pos, bounds.top()), size(px(2.), bounds.bottom() - bounds.top())),
-          gpui::blue(),
+          gpui_component::Theme::global(cx).caret,
         )),
       )
     } else {
@@ -466,7 +466,7 @@ impl Element for TextElement {
             point(bounds.left() + line.x_for_index(selected_range.start), bounds.top()),
             point(bounds.left() + line.x_for_index(selected_range.end), bounds.bottom()),
           ),
-          rgba(0x3311ff30),
+          gpui_component::Theme::global(cx).selection,
         )),
         None,
       )
@@ -530,7 +530,8 @@ impl Render for TextInput {
       .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
       .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
       .on_mouse_move(cx.listener(Self::on_mouse_move))
-      .bg(rgb(crate::theme::ColorRole::PANEL))
+      .bg(rgb(crate::theme::ColorRole::BG))
+      .text_color(rgb(crate::theme::ColorRole::TEXT))
       .line_height(px(30.))
       .text_size(px(13.))
       .child(
@@ -538,7 +539,7 @@ impl Render for TextInput {
           .h(px(30. + 4. * 2.))
           .w_full()
           .p(px(4.))
-          .bg(rgb(crate::theme::ColorRole::PANEL))
+          .bg(rgb(crate::theme::ColorRole::BG))
           .child(TextElement { input: cx.entity() }),
       )
   }

@@ -8,7 +8,10 @@ impl Lens {
     let remote = self.remote_branches.clone();
     let root = self.root.clone();
     Button::new("branch-menu")
-      .label(if self.connected { format!("⑂ {current} ▾") } else { t("Branch · not connected") })
+      .icon(IconName::GitBranch)
+      .h(px(36.))
+      .min_w(px(140.))
+      .label(if self.connected { format!("{current} ▾") } else { t("Branch · not connected") })
       .disabled(!enabled)
       .dropdown_menu(move |mut menu, window, cx| {
         menu = menu.min_w(px(280.)).max_w(px(360.));

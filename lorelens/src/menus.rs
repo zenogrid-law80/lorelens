@@ -67,7 +67,11 @@ impl Lens {
     } else {
       format!("{} ▾", t(kind))
     };
-    Button::new(if toolbar { "repository-selector" } else { kind }).label(label).dropdown_menu(move |mut menu, window, cx| {
+    let button = Button::new(if toolbar { "repository-selector" } else { kind })
+      .label(label)
+      .when(toolbar, |button| button.icon(IconName::Database).h(px(36.)).min_w(px(140.)))
+      .when(!toolbar && kind != "Account", |button| button.ghost());
+    button.dropdown_menu(move |mut menu, window, cx| {
       let items: Vec<(&str, &str, bool)> = match kind {
         "Repository" => vec![("Open repository…", "open", ready), ("Clone repository…", "clone", ready), ("Create repository…", "create", ready)],
         "Changes" => vec![

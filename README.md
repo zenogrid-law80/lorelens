@@ -111,7 +111,7 @@ Diff compares the current revision with a copy of the local file. Temporary comp
 - **Repository**: open, clone, and revisit repositories.
 - **Changes**: Stage, Unstage, Commit staged, File history, and Pending push.
 - **Tools**: select a Diff / Merge tool, locate an executable, use `PATH`, and locate the Lore CLI.
-- **View**: choose a theme and open the command log.
+- **View**: choose a theme and open the command log. New installations use **LoreLens Light**, with white panels and gold accents. Select it under **View → Theme… → Light**; **LoreLens Dark** is also available. Existing theme preferences are preserved, and the system theme switches between the two LoreLens themes to match the OS appearance.
 - **Account**: log in and display the current account.
 
 The second row contains the repository selector, branch menu, Refresh, Sync, and Push. The file context menu contains Diff, Stage/Unstage, Discard, Move, Explorer/Finder navigation, terminal access, and Lock/Unlock actions.

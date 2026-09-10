@@ -1,17 +1,5 @@
 use super::*;
 
-pub(super) fn favicon_image() -> std::sync::Arc<gpui::Image> {
-  static ICON: std::sync::LazyLock<std::sync::Arc<gpui::Image>> = std::sync::LazyLock::new(|| {
-    // The bundled ICO contains a single PNG frame. Embed it so installed builds
-    // do not depend on the source directory or a separate icon file.
-    let ico = include_bytes!("../dist/favicon.ico");
-    let length = u32::from_le_bytes(ico[14..18].try_into().unwrap()) as usize;
-    let offset = u32::from_le_bytes(ico[18..22].try_into().unwrap()) as usize;
-    std::sync::Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, ico[offset..offset + length].to_vec()))
-  });
-  ICON.clone()
-}
-
 impl Lens {
   fn toggle_tree_folder(&mut self, path: PathBuf, cx: &mut Context<Self>) {
     if self.busy {
@@ -188,13 +176,13 @@ impl Lens {
         div().id(("tree-context", i)).child(
           div()
             .id(("tree-file", i))
-            .h(px(30.))
+            .h(px(32.))
             .px_3()
             .pl(px(12. + depth as f32 * 16.))
             .flex()
             .gap_2()
             .items_center()
-            .bg(rgb(if self.selection.paths.contains(&relative) { Selected } else { PANEL }))
+            .bg(rgb(if self.selection.paths.contains(&relative) { Selected } else { Sidebar }))
             .cursor_pointer()
             .hover(|s| s.bg(rgb(Hover)))
             .when(directory && ready, |row| {
@@ -215,11 +203,22 @@ impl Lens {
                   }
                 }))
                 .w(px(14.))
-                .text_color(rgb(if directory { Warning } else { MUTED }))
-                .child(if directory { if self.expanded_folders.contains(&path) { "▾" } else { "▸" } } else { "·" }),
+                .text_color(rgb(MUTED))
+                .when(directory, |toggle| {
+                  toggle.child(Icon::new(if self.expanded_folders.contains(&path) { IconName::ChevronDown } else { IconName::ChevronRight }).size(px(14.)))
+                }),
+            )
+            .child(
+              Icon::new(if directory {
+                if self.expanded_folders.contains(&path) { IconName::FolderOpen } else { IconName::Folder }
+              } else {
+                IconName::FileText
+              })
+              .size(px(16.))
+              .text_color(rgb(if directory { Warning } else { MUTED })),
             )
             .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().child(label))
-            .child(div().text_size(px(10.)).text_color(rgb(BLUE)).child(marker))
+            .child(div().text_size(px(10.)).text_color(rgb(Accent)).child(marker))
             .child(
               div()
                 .text_size(px(10.))
@@ -843,25 +842,53 @@ impl Lens {
       .flex()
       .flex_col()
       .min_h_0()
-      .bg(rgb(PANEL))
-      .border_r_1()
+      .bg(rgb(Sidebar))
+      .border_1()
       .border_color(rgb(BORDER))
+      .rounded_lg()
+      .overflow_hidden()
       .child(
         div()
           .px_3()
-          .py_2()
+          .h(px(44.))
+          .flex_shrink_0()
           .border_b_1()
           .border_color(rgb(BORDER))
           .text_size(px(11.))
-          .text_color(rgb(BLUE))
+          .text_color(rgb(MUTED))
+          .font_weight(FontWeight::SEMIBOLD)
           .flex()
           .items_center()
           .gap_2()
           .child(t("FILES")),
       )
       .child(div().px_3().pt_3().font_weight(FontWeight::SEMIBOLD).child(title.clone()))
-      .child(div().px_3().py_2().text_size(px(10.)).text_color(rgb(MUTED)).child(self.root.display().to_string()))
-      .child(div().mx_3().mb_2().overflow_hidden().border_1().border_color(rgb(BORDER)).rounded_md().child(self.filter.clone()))
+      .child(
+        div()
+          .px_3()
+          .py_2()
+          .text_size(px(12.))
+          .text_color(rgb(MUTED))
+          .overflow_hidden()
+          .text_ellipsis()
+          .child(self.root.display().to_string()),
+      )
+      .child(
+        div()
+          .mx_3()
+          .mb_2()
+          .pl_2()
+          .flex()
+          .flex_shrink_0()
+          .items_center()
+          .bg(rgb(BG))
+          .overflow_hidden()
+          .border_1()
+          .border_color(rgb(BORDER))
+          .rounded_md()
+          .child(Icon::new(IconName::Search).size(px(16.)).text_color(rgb(MUTED)))
+          .child(div().flex_1().min_w_0().child(self.filter.clone())),
+      )
       .child(
         div()
           .px_3()

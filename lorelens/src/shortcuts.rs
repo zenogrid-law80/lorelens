@@ -235,7 +235,7 @@ impl Lens {
     let line_ending = self.settings.text_line_ending.clone();
     let encoding = self.settings.text_encoding.clone();
     let ready = !self.busy;
-    Button::new("options-menu").label(format!("{} ▾", t("Options"))).dropdown_menu(move |menu, window, cx| {
+    Button::new("options-menu").ghost().label(format!("{} ▾", t("Options"))).dropdown_menu(move |menu, window, cx| {
       let refresh_view = view.clone();
       let menu = menu
         .item(PopupMenuItem::new(t("Auto refresh (30s)")).checked(auto_refresh).on_click(move |_, _, cx| {

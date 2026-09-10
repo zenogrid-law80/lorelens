@@ -55,7 +55,7 @@ impl Default for Settings {
       recent: Vec::new(),
       bookmarks: Vec::new(),
       cli: None,
-      theme: "System".into(),
+      theme: crate::theme::DEFAULT_THEME.into(),
       show_command_log: true,
       auto_refresh: true,
       text_line_ending: "LF".into(),
@@ -189,7 +189,7 @@ impl Settings {
       bookmarks: Self::normalized_bookmarks(bookmarks),
       cli,
       language: crate::i18n::normalize(data["language"].as_str().unwrap_or("en-US")).into(),
-      theme: data["theme"].as_str().unwrap_or("System").to_string(),
+      theme: data["theme"].as_str().unwrap_or(crate::theme::DEFAULT_THEME).to_string(),
       show_command_log: data["show_command_log"].as_bool().unwrap_or(true),
       auto_refresh: data["auto_refresh"].as_bool().unwrap_or(true),
       text_line_ending: match data["text_line_ending"].as_str().unwrap_or("LF") {
