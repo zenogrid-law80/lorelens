@@ -248,7 +248,6 @@ impl Lens {
               this.notice = "Logged out".into();
               this.output_title = "Logout".into();
               this.output = t("Logged out");
-              this.show_log = false;
               this.save_settings();
             } else if kind == CommandKind::Login {
               this.settings.login_remote = login_remote;
@@ -256,7 +255,6 @@ impl Lens {
               this.notice = "Login completed. Open or clone a repository.".into();
               this.output = t(&this.notice);
               this.output_title = "Login".into();
-              this.show_log = false;
             } else if kind.is_authentication() {
               match backend::parse_account(&output) {
                 Ok((id, name)) => {
@@ -278,7 +276,6 @@ impl Lens {
             } else {
               this.output = if output.trim().is_empty() { "Command completed successfully.".into() } else { output };
               this.output_title = title.clone();
-              this.show_log = false;
               this.notice = tf("{title} completed", &[("title", t(&title))]);
             }
             this.log(this.notice.clone());
@@ -320,7 +317,6 @@ impl Lens {
             } else {
               e.clone()
             };
-            this.show_log = false;
             this.log(e);
             if matches!(kind, CommandKind::Merge | CommandKind::Obliterate) {
               this.refresh_pending = true;

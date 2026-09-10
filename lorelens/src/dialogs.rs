@@ -1,6 +1,89 @@
 use super::*;
+use gpui_component::scroll::ScrollableElement as _;
 
 impl Lens {
+  pub(super) fn theme_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let themes = gpui_component::ThemeRegistry::global(cx).sorted_themes();
+    let light = themes.iter().filter(|theme| !theme.mode.is_dark()).map(|theme| theme.name.to_string()).collect::<Vec<_>>();
+    let dark = themes.iter().filter(|theme| theme.mode.is_dark()).map(|theme| theme.name.to_string()).collect::<Vec<_>>();
+    let show_dark = std::rc::Rc::new(std::cell::Cell::new(
+      themes
+        .iter()
+        .find(|theme| theme.name.as_ref() == self.settings.theme)
+        .map(|theme| theme.mode.is_dark())
+        .unwrap_or_else(|| gpui_component::Theme::global(cx).is_dark()),
+    ));
+    // The dialog is rendered while Lens is borrowed; keep its selection locally.
+    let selection = std::rc::Rc::new(std::cell::RefCell::new(self.settings.theme.clone()));
+    let view = cx.entity().downgrade();
+    window.open_dialog(cx, move |dialog, _, _| {
+      let current = selection.borrow().clone();
+      let system_selection = selection.clone();
+      let system_view = view.clone();
+      let dark_selected = show_dark.get();
+      let mut theme_list = div().flex().flex_col().gap_1();
+      for (index, name) in if dark_selected { &dark } else { &light }.iter().enumerate() {
+        let theme_view = view.clone();
+        let theme_selection = selection.clone();
+        let theme = name.clone();
+        let label = if current == theme { format!("✓ {theme}") } else { theme.clone() };
+        theme_list = theme_list.child(Button::new(("theme-option", index)).label(label).w_full().on_click(move |_, window, cx| {
+          let selected_theme = theme.clone();
+          *theme_selection.borrow_mut() = selected_theme.clone();
+          let _ = theme_view.update(cx, |this, cx| {
+            this.settings.theme = theme.clone();
+            this.save_settings();
+            cx.notify();
+          });
+          defer_theme(selected_theme, window, cx);
+        }));
+      }
+      let light_mode = show_dark.clone();
+      let dark_mode = show_dark.clone();
+      let system_label = t("System theme");
+      dialog
+        .title(t("Choose theme"))
+        .w(px(520.))
+        .button_props(DialogButtonProps::default().ok_text(t("Close")))
+        .child(
+          Button::new("system-theme")
+            .label(if current == "System" { format!("✓ {system_label}") } else { system_label })
+            .w_full()
+            .on_click(move |_, window, cx| {
+              *system_selection.borrow_mut() = "System".into();
+              let _ = system_view.update(cx, |this, cx| {
+                this.settings.theme = "System".into();
+                this.save_settings();
+                cx.notify();
+              });
+              defer_theme("System", window, cx);
+            }),
+        )
+        .child(
+          div()
+            .flex()
+            .gap_2()
+            .child(
+              Button::new("light-theme-mode")
+                .label(if dark_selected { t("Light") } else { format!("✓ {}", t("Light")) })
+                .on_click(move |_, window, _| {
+                  light_mode.set(false);
+                  window.refresh();
+                }),
+            )
+            .child(
+              Button::new("dark-theme-mode")
+                .label(if dark_selected { format!("✓ {}", t("Dark")) } else { t("Dark") })
+                .on_click(move |_, window, _| {
+                  dark_mode.set(true);
+                  window.refresh();
+                }),
+            ),
+        )
+        .child(div().h(px(460.)).min_h_0().overflow_y_scrollbar().pr_2().child(theme_list))
+    });
+  }
+
   pub(super) fn custom_tool_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     if self.busy {
       return;
@@ -28,8 +111,9 @@ impl Lens {
       let error = validation.borrow().clone();
       dialog
         .title(t("Custom diff / merge tool"))
-        .confirm()
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Save")))
+        .close_button(false)
+        .overlay_closable(false)
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Save")))
         .child(t("Application name"))
         .child(name.clone())
         .child(t("Application location"))
@@ -122,8 +206,9 @@ impl Lens {
       let validation_text = validation.borrow().clone();
       dialog
         .title(t("Unpushed local commits"))
-        .confirm()
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Discard all unpushed commits")))
+        .close_button(false)
+        .overlay_closable(false)
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Discard all unpushed commits")))
         .child(
           div()
             .flex()
@@ -229,8 +314,9 @@ impl Lens {
       let (root, branch, revision, identity, targets, view) = (root.clone(), branch.clone(), revision.clone(), identity.clone(), targets.clone(), view.clone());
       dialog
         .title(t(title))
-        .confirm()
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t(title)))
+        .close_button(false)
+        .overlay_closable(false)
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t(title)))
         .child(
           div()
             .flex()
@@ -329,8 +415,8 @@ impl Lens {
             let view = view.clone();
             let validation = validation.clone();
             let error = t(&validation.borrow());
-            dialog.title(t("Obliterate file")).confirm()
-                .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Obliterate")))
+            dialog.title(t("Obliterate file")).close_button(false).overlay_closable(false)
+                .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Obliterate")))
                 .child(div().flex().flex_col().gap_2()
                     .child(root.display().to_string())
                     .child(tf("{count} items selected", &[("count", paths.len().to_string())]))
@@ -393,8 +479,9 @@ impl Lens {
       let close_destination = destination.clone();
       dialog
         .title(t("Create repository"))
-        .confirm()
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Create")))
+        .close_button(false)
+        .overlay_closable(false)
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Create")))
         .child(
           div()
             .flex()
@@ -450,7 +537,6 @@ impl Lens {
                 let result = task.await;
                 let _ = this.update(cx, |this, cx| {
                   this.busy = false;
-                  this.show_log = false;
                   match result {
                     Ok(output) => {
                       this.log(output);
@@ -516,8 +602,9 @@ impl Lens {
       let error = t(&validation.borrow());
       dialog
         .title(t(title))
-        .confirm()
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t(title)))
+        .close_button(false)
+        .overlay_closable(false)
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t(title)))
         .child(
           div()
             .flex()
@@ -588,8 +675,9 @@ impl Lens {
       let view = view.clone();
       dialog
         .title(t("Delete"))
-        .confirm()
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Delete")))
+        .close_button(false)
+        .overlay_closable(false)
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Delete")))
         .child(
           div()
             .flex()
@@ -626,7 +714,6 @@ impl Lens {
                 let result = task.await;
                 let _ = this.update(cx, |this, cx| {
                   this.busy = false;
-                  this.show_log = false;
                   this.selection.clear();
                   match result {
                     Ok(()) => {
@@ -668,8 +755,9 @@ impl Lens {
       let view = view.clone();
       dialog
         .title(t("Logout"))
-        .confirm()
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Logout")))
+        .close_button(false)
+        .overlay_closable(false)
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Logout")))
         .child(t("Log out all Lore CLI accounts on this device? URL history and local repositories will be kept."))
         .on_ok(move |_, _, cx| {
           view
@@ -705,8 +793,9 @@ impl Lens {
       let validation_text = t(&validation.borrow());
       dialog
         .title(t("Login"))
-        .confirm()
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Login")))
+        .close_button(false)
+        .overlay_closable(false)
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Login")))
         .child(
           div()
             .flex()
@@ -765,8 +854,9 @@ impl Lens {
       let validation = validation.clone();
       dialog
         .title(t("Merge local branch"))
-        .confirm()
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Merge")))
+        .close_button(false)
+        .overlay_closable(false)
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Merge")))
         .child(tf("Target (current branch): {target}", &[("target", target.to_string())]))
         .child(t("Source branch"))
         .child(Self::history_input("merge-source-branch", name.clone(), branches.clone()))
@@ -808,8 +898,9 @@ impl Lens {
       let root = root.clone();
       dialog
         .title(t("Switch local branch"))
-        .confirm()
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Switch")))
+        .close_button(false)
+        .overlay_closable(false)
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Switch")))
         .child(Self::history_input("switch-local-branch", name.clone(), branches.clone()))
         .on_ok(move |_, _, cx| {
           let branch = input.read(cx).content.trim().to_string();
@@ -843,8 +934,9 @@ impl Lens {
       let root = root.clone();
       dialog
         .title(t(title))
-        .confirm()
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Create")))
+        .close_button(false)
+        .overlay_closable(false)
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Create")))
         .child(t("Branch name"))
         .child(name.clone())
         .child(if remote {
@@ -887,7 +979,6 @@ impl Lens {
                     Ok(output) => output,
                     Err(error) => tf("Branch operation failed:\n{error}", &[("error", error.to_string())]),
                   };
-                  this.show_log = false;
                   this.log(this.output.clone());
                   this.show_branches = true;
                   this.refresh(cx);
@@ -920,8 +1011,9 @@ impl Lens {
       let error = validation.borrow().clone();
       dialog
         .title(t("Move"))
-        .confirm()
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Move")))
+        .close_button(false)
+        .overlay_closable(false)
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Move")))
         .child(
           div()
             .flex()
@@ -957,7 +1049,6 @@ impl Lens {
                 let result = task.await;
                 let _ = this.update(cx, |this, cx| {
                   this.busy = false;
-                  this.show_log = false;
                   match result {
                     Ok(()) => {
                       this.selection.clear();
@@ -1051,8 +1142,9 @@ impl Lens {
       let close_destination = destination.clone();
       dialog
         .title(t("Clone repository"))
-        .confirm()
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Clone")))
+        .close_button(false)
+        .overlay_closable(false)
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Clone")))
         .child(
           div()
             .flex()
@@ -1107,7 +1199,6 @@ impl Lens {
                 let result = task.await;
                 let _ = this.update(cx, |this, cx| {
                   this.busy = false;
-                  this.show_log = false;
                   match result {
                     Ok(output) => {
                       this.log(output);

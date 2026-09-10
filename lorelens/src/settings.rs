@@ -18,6 +18,7 @@ pub struct Settings {
   pub bookmarks: Vec<Bookmark>,
   pub cli: Option<PathBuf>,
   pub theme: String,
+  pub show_command_log: bool,
   pub language: String,
   pub external_tool: String,
   pub tool_paths: std::collections::BTreeMap<String, PathBuf>,
@@ -45,6 +46,7 @@ impl Default for Settings {
       bookmarks: Vec::new(),
       cli: None,
       theme: "System".into(),
+      show_command_log: true,
       language: "en-US".into(),
       external_tool: "idea".into(),
       tool_paths: Default::default(),
@@ -174,6 +176,7 @@ impl Settings {
       cli,
       language: crate::i18n::normalize(data["language"].as_str().unwrap_or("en-US")).into(),
       theme: data["theme"].as_str().unwrap_or("System").to_string(),
+      show_command_log: data["show_command_log"].as_bool().unwrap_or(true),
       external_tool: data["external_tool"]
         .as_str()
         .or_else(|| data["diff_tool"].as_str())
@@ -308,7 +311,7 @@ impl Settings {
       .collect();
     serde_json::to_writer_pretty(
       &mut file,
-      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "custom_tool_name": self.custom_tool_name, "custom_tool_path": self.custom_tool_path, "custom_tool_arguments": self.custom_tool_arguments, "recent": Self::normalized_recent(self.recent.clone()), "bookmarks": bookmarks, "cli": self.cli, "theme": self.theme, "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
+      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "custom_tool_name": self.custom_tool_name, "custom_tool_path": self.custom_tool_path, "custom_tool_arguments": self.custom_tool_arguments, "recent": Self::normalized_recent(self.recent.clone()), "bookmarks": bookmarks, "cli": self.cli, "theme": self.theme, "show_command_log": self.show_command_log, "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
     )?;
     file.sync_all()?;
     drop(file);
@@ -319,6 +322,18 @@ impl Settings {
 #[cfg(test)]
 mod tests {
   use super::*;
+  #[test]
+  fn command_log_visibility_survives_restart_and_defaults_to_visible() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    assert!(Settings::load(&path).unwrap().show_command_log);
+
+    let mut settings = Settings::default();
+    settings.show_command_log = false;
+    settings.save(&path).unwrap();
+    assert!(!Settings::load(&path).unwrap().show_command_log);
+  }
+
   #[test]
   fn create_history_survives_restart_and_is_bounded() {
     let dir = tempfile::tempdir().unwrap();

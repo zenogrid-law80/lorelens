@@ -162,7 +162,7 @@ impl Lens {
         self.notice = t("Workspace closed.");
       }
       "refresh" => self.refresh(cx),
-      "search" => window.focus(&self.filter.read(cx).focus_handle(cx)),
+      "search" => window.focus(&self.filter.read(cx).focus_handle(cx), cx),
       "terminal" | "reveal" => {
         let Some(relative) = self.selection.current.clone() else {
           return;
@@ -350,9 +350,10 @@ impl Lens {
       });
       dialog
         .title(t("Bookmark management"))
-        .confirm()
+        .close_button(false)
+        .overlay_closable(false)
         .w(px(760.))
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Save")))
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Save")))
         .child(t("Edit paths relative to their repository root. Remove a row to delete its bookmark."))
         .child(content)
         .child(error.borrow().clone())
@@ -410,9 +411,10 @@ impl Lens {
       let validation = error.clone();
       dialog
         .title(t("Keyboard shortcuts"))
-        .confirm()
+        .close_button(false)
+        .overlay_closable(false)
         .w(px(680.))
-        .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Save")))
+        .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Save")))
         .child(t("Enter a shortcut such as Ctrl+Shift+G. Leave blank to unassign."))
         .child(t(
           "Shortcuts use Lore's stage, commit, sync, and push workflow. Delete and revert keep their existing confirmation steps.",

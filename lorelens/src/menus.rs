@@ -77,12 +77,7 @@ impl Lens {
           ("File history", "history", file),
           ("Pending push", "pending", ready),
         ],
-        "View" => vec![
-          ("System theme", "System", true),
-          ("Light theme", "Light", true),
-          ("Dark theme", "Dark", true),
-          ("Command log", "log", true),
-        ],
+        "View" => vec![("Theme…", "theme", true), ("Command log", "log", true)],
         _ => vec![("Login…", "login", ready), ("Logout", "logout", ready)],
       };
       for (label, action, enabled) in items {
@@ -102,12 +97,17 @@ impl Lens {
                   "commit" => this.commit_staged(cx),
                   "login" => this.login_dialog(window, cx),
                   "logout" => this.logout_dialog(window, cx),
+                  "theme" => this.theme_dialog(window, cx),
                   "System" | "Light" | "Dark" => {
                     this.settings.theme = action.into();
-                    apply_theme(action, Some(window), cx);
+                    defer_theme(action, window, cx);
                     this.save_settings();
                   }
-                  "log" => this.show_log = !this.show_log,
+                  "log" => {
+                    this.show_log = !this.show_log;
+                    this.settings.show_command_log = this.show_log;
+                    this.save_settings();
+                  }
                   "pending" => {
                     this.output_title = "Pending push commits".into();
                     this.output = match &this.pending_push {
@@ -121,7 +121,6 @@ impl Lens {
                       ),
                       Err(error) => error.clone(),
                     };
-                    this.show_log = false;
                   }
                   _ => {}
                 }
@@ -132,7 +131,7 @@ impl Lens {
       }
       if kind == "View" {
         let language_view = view.clone();
-        menu = menu.separator().submenu(t("Language"), window, cx, move |mut menu, _, cx| {
+        menu = menu.submenu(t("Language"), window, cx, move |mut menu, _, cx| {
           let current = language_view.upgrade().map(|entity| entity.read(cx).settings.language.clone()).unwrap_or_default();
           for (code, name) in i18n::LOCALES {
             let view = language_view.clone();

@@ -13,8 +13,8 @@ impl Lens {
     let view = cx.entity().downgrade();
     window.open_dialog(cx, move |dialog, _, _| {
             let view = view.clone();
-            dialog.title(t("Install Lore CLI")).confirm()
-                .button_props(DialogButtonProps::default().cancel_text(t("Cancel")).ok_text(t("Install")))
+            dialog.title(t("Install Lore CLI")).close_button(false).overlay_closable(false)
+                .button_props(DialogButtonProps::default().show_cancel(true).cancel_text(t("Cancel")).ok_text(t("Install")))
                 .child(t("Lore CLI was not found. Install it with winget install EpicGames.Lore and save its path to the user environment variable LORELENS_LORE_BIN? Accepting also accepts the package and source agreements."))
                 .on_ok(move |_, _, cx| {
                     let _ = view.update(cx, |this, cx| this.install_cli(cx));

@@ -38,7 +38,6 @@ impl Lens {
       let result = task.await;
       let _ = this.update(cx, |this, cx| {
         this.busy = false;
-        this.show_log = false;
         match result {
           Ok(count) => {
             this.output_title = "Copy completed".into();
@@ -161,6 +160,7 @@ impl Lens {
       }))
       .flex_1()
       .min_h_0()
+      .pr(px(12.))
       .overflow_y_scroll();
     let mut count = 0;
     for (i, entry) in self
@@ -228,7 +228,7 @@ impl Lens {
             )
             .child(div().text_size(px(10.)).text_color(rgb(MUTED)).child(if directory { String::new() } else { format_size(entry.size) }))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-              window.focus(&this.files_focus);
+              window.focus(&this.files_focus, cx);
               let modifiers = event.modifiers();
               let additive = modifiers.control || modifiers.platform;
               // A preview from the first click may still be loading.
@@ -839,8 +839,7 @@ impl Lens {
             this.copy_dropped_paths(paths, this.directory.clone(), cx);
           }))
       })
-      .w(px(320.))
-      .flex_shrink_0()
+      .size_full()
       .flex()
       .flex_col()
       .min_h_0()
@@ -890,7 +889,16 @@ impl Lens {
               .child(format!("/{}", self.directory.strip_prefix(&self.root).unwrap_or(&self.directory).to_string_lossy().replace('\\', "/"))),
           ),
       )
-      .child(files)
+      .child(
+        div()
+          .relative()
+          .flex_1()
+          .min_h_0()
+          .flex()
+          .flex_col()
+          .child(files)
+          .child(gpui_component::scroll::Scrollbar::vertical(&self.files_scroll).mode(gpui_component::scroll::ScrollbarMode::Always)),
+      )
       .when(self.entries.len() > 2000, |d| {
         d.child(div().p_2().text_size(px(10.)).text_color(rgb(MUTED)).child(t("Up to 2,000 matches. Filter to narrow.")))
       })

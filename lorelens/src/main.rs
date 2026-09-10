@@ -4,7 +4,7 @@ mod macos;
 mod state;
 use state::{PreviewState, SelectionState};
 mod theme;
-use theme::{ColorRole::*, apply_theme, palette};
+use theme::{ColorRole::*, apply_theme, defer_theme, palette};
 mod backend;
 mod branches;
 #[cfg(windows)]
@@ -30,10 +30,13 @@ use gpui_component::{
   button::Button,
   dialog::DialogButtonProps,
   menu::{ContextMenuExt, DropdownMenu, PopupMenuItem},
+  resizable::{h_resizable, resizable_panel, v_resizable},
 };
 use gpui_component::{Sizable, button::ButtonVariants};
 use input::TextInput;
 use std::{path::PathBuf, process::Command};
+
+include!(concat!(env!("OUT_DIR"), "/bundled_themes.rs"));
 
 fn canonicalize_path(path: PathBuf) -> PathBuf {
   let canonical = match path.canonicalize() {
@@ -293,6 +296,7 @@ impl Lens {
 
   fn new(root: PathBuf, settings: settings::Settings, settings_error: Option<String>, cx: &mut Context<Self>) -> Self {
     i18n::set_locale(&settings.language);
+    let show_log = settings.show_command_log;
     let connect_after_load = backend::is_repository(&root);
     let filter = cx.new(|cx| TextInput::new("Filter files…", cx));
     cx.observe(&filter, |_, _, cx| cx.notify()).detach();
@@ -312,7 +316,7 @@ impl Lens {
             selection: SelectionState::default(), preview: PreviewState::default(), output: "Open a folder to browse local files.\n\nFor version control, open a Lore repository and locate the Lore CLI.\nUse Sync to synchronize the current repository. Commits are not pushed automatically.".into(),
             output_title: "Welcome to LoreLens".into(), logs: vec![],
             message: cx.new(|cx| TextInput::new("Describe your staged changes…", cx)),
-            filter, pending_filter, selected_path, pending_visible: Vec::new(), notice: "Opening repository…".into(), error: false, show_log: false, obliterate_enabled: false,
+            filter, pending_filter, selected_path, pending_visible: Vec::new(), notice: "Opening repository…".into(), error: false, show_log, obliterate_enabled: false,
             settings, settings_error, branch_output: String::new(), show_branches: false,
             connect_after_load,
             startup_login_pending: false,
@@ -575,7 +579,6 @@ impl Lens {
     }
     self.selection.select(path.clone());
     self.output_title = path.clone();
-    self.show_log = false;
     let root = self.root.clone();
     let file = root.join(&path);
     let request = self.preview.begin();
@@ -648,7 +651,7 @@ impl Lens {
           cx,
         )
         .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-          window.focus(&this.pending_focus);
+          window.focus(&this.pending_focus, cx);
           if this.busy {
             return;
           }
@@ -889,18 +892,12 @@ fn main() {
     .or_else(|| settings.restore())
     .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
   let root = canonicalize_path(root);
-  Application::new().with_assets(gpui_component_assets::Assets).run(move |cx: &mut App| {
+  gpui_platform::application().with_assets(gpui_kit_assets::Assets).run(move |cx: &mut App| {
     #[cfg(target_os = "macos")]
     macos::set_application_icon();
     gpui_component::init(cx);
-    let theme_set: gpui_component::ThemeSet = serde_json::from_str(include_str!("../themes/longbridge-pro.json")).expect("bundled Longbridge-inspired theme must be valid");
-    for config in theme_set.themes {
-      let theme = gpui_component::Theme::global_mut(cx);
-      if config.mode.is_dark() {
-        theme.dark_theme = std::rc::Rc::new(config);
-      } else {
-        theme.light_theme = std::rc::Rc::new(config);
-      }
+    for theme in BUNDLED_THEMES {
+      gpui_component::ThemeRegistry::global_mut(cx).load_themes_from_str(theme).expect("bundled theme must be valid");
     }
     apply_theme(&settings.theme, None, cx);
     input::init(cx);
@@ -974,7 +971,7 @@ fn main() {
     )
     .expect("Could not open LoreLens window");
     cx.activate(true);
-    cx.on_window_closed(|cx| {
+    cx.on_window_closed(|cx, _| {
       if cx.windows().is_empty() {
         cx.quit();
       }

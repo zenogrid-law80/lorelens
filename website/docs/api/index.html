@@ -10,7 +10,7 @@
 <a class="skip" href="#main">Skip to content</a>
 <header class="docs-header"><a class="brand" href="../../"><img class="mark" src="../../favicon.ico" alt="" width="30" height="30">LoreLens</a><div class="header-actions"><nav aria-label="Documentation navigation"><a href="../../">Home</a><a href="#menu-usage">Menu usage</a><a href="#cli-api">CLI API</a></nav><label class="language-picker"><span class="sr-only">Language</span><select data-language aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="zh">中文</option></select></label></div></header>
 <main id="main" class="docs-layout">
-  <aside class="docs-sidebar" aria-label="Documentation categories"><p class="eyebrow">DOCUMENTATION</p><a class="active" href="#menu-usage">Menu usage</a><a href="#repository">Repository</a><a href="#changes">Changes</a><a href="#options">Options</a><a href="#view">View &amp; account</a><a href="#cli-api">CLI API</a></aside>
+  <aside class="docs-sidebar" aria-label="Documentation categories"><p class="eyebrow">DOCUMENTATION</p><a class="active" href="#menu-usage">Menu usage</a><a href="#repository">Repository</a><a href="#changes">Changes</a><a href="#options">Options</a><a href="#view">View &amp; account</a><a href="#theme-selection">Theme selection</a><a href="#cli-api">CLI API</a></aside>
   <article class="docs-content">
     <div class="eyebrow"><span class="dot"></span> API DOCUMENTATION</div>
     <h1>Menu usage</h1>
@@ -21,10 +21,12 @@
         <tr id="repository"><td>Repository</td><td>Open a local repository, clone a repository, and select a recent repository. Entries whose folders no longer exist are removed when the menu opens.</td></tr>
         <tr id="changes"><td>Changes</td><td>Stage or unstage the selected file, commit staged changes, open file history, and inspect commits waiting to be pushed.</td></tr>
         <tr id="options"><td>Options</td><td>Select the shared diff and merge tool, locate its executable, use PATH lookup, select the Lore CLI executable, or configure keyboard shortcuts.</td></tr>
-        <tr id="view"><td>View</td><td>Choose System, Light, or Dark theme; open the command log; and select the UI language.</td></tr>
+        <tr id="view"><td>View</td><td>Open the theme picker, open the command log, and select the UI language.</td></tr>
         <tr><td>Account</td><td>Log in, log out, and view the current account.</td></tr>
       </tbody></table></div>
     </section>
+
+    <section id="theme-selection"><h2>Theme selection</h2><p>Open View → Theme… to choose the application theme. Select System theme to follow your operating system appearance, or use the Light and Dark tabs to browse the built-in themes.</p><p>The preview updates as soon as you select a theme. LoreLens saves your choice and restores it the next time the app starts.</p></section>
 
     <section><h2>File context menus</h2><p>Right-click a file or folder in the file browser for filesystem actions. The exact actions depend on the selected item and its repository state.</p>
       <ul><li><strong>Diff</strong> is shown for modified files and opens the configured external comparison tool.</li><li><strong>Stage / Unstage</strong> changes the staging state of tracked files.</li><li><strong>Discard</strong> resets a changed file to the current revision.</li><li><strong>Move</strong> moves a file or folder within the repository.</li><li><strong>Delete</strong> permanently deletes the selected file or folder after confirmation. Repository metadata and symbolic links are protected.</li></ul>

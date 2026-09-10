@@ -7,7 +7,8 @@ impl Render for Lens {
     let vcs = ready && self.connected;
     let staged = self.status.changes.iter().filter(|c| c.staged).count();
 
-    let sidebar = div().flex().when(!self.root.as_os_str().is_empty(), |d| d.child(self.render_file_browser(cx)));
+    let sidebar_visible = !self.root.as_os_str().is_empty();
+    let sidebar = div().size_full().flex().when(sidebar_visible, |d| d.child(self.render_file_browser(cx)));
     let mut tabs = div().flex().gap_2().px_3().py_2().border_b_1().border_color(rgb(BORDER));
     for (id, label, tab) in [
       ("pending-tab", "Changes", Tab::Pending),
@@ -59,8 +60,8 @@ impl Render for Lens {
       .track_focus(&self.pending_focus)
       .on_mouse_down(
         MouseButton::Left,
-        cx.listener(|this, _, window, _| {
-          window.focus(&this.pending_focus);
+        cx.listener(|this, _, window, cx| {
+          window.focus(&this.pending_focus, cx);
         }),
       )
       .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
@@ -100,7 +101,7 @@ impl Render for Lens {
         .flex_1()
         .min_h_0()
         .pr(px(12.))
-        .track_scroll(self.pending_scroll.clone()),
+        .track_scroll(&self.pending_scroll),
       );
     }
     if self.pending_visible.is_empty() {
@@ -112,16 +113,9 @@ impl Render for Lens {
         "Open a Lore repository and Refresh to view pending changes."
       })));
     }
-    let details = if self.show_log {
-      self.logs.join("\n\n")
-    } else {
-      if self.output_title == "Welcome to LoreLens" || self.output_title == "Move completed" {
-        t(&self.output)
-      } else {
-        self.output.clone()
-      }
-    };
-    let lines = details
+    let lines = self
+      .logs
+      .join("\n\n")
       .lines()
       .take(1500)
       .enumerate()
@@ -148,8 +142,6 @@ impl Render for Lens {
       .flex()
       .flex_col()
       .min_h_0()
-      .when(self.tab == Tab::Pending, |d| d.h(px(270.)).flex_shrink_0())
-      .when(self.tab != Tab::Pending, |d| d.flex_1())
       .border_t_1()
       .border_color(rgb(BORDER))
       .child(
@@ -160,28 +152,7 @@ impl Render for Lens {
           .px_4()
           .py_2()
           .bg(rgb(PANEL))
-          .child(
-            div()
-              .id("details-tab")
-              .cursor_pointer()
-              .text_color(rgb(if self.show_log { MUTED } else { BLUE }))
-              .child(t("Details"))
-              .on_click(cx.listener(|this, _, _, cx| {
-                this.show_log = false;
-                cx.notify();
-              })),
-          )
-          .child(
-            div()
-              .id("log-tab")
-              .cursor_pointer()
-              .text_color(rgb(if self.show_log { BLUE } else { MUTED }))
-              .child(t("Command log"))
-              .on_click(cx.listener(|this, _, _, cx| {
-                this.show_log = true;
-                cx.notify();
-              })),
-          )
+          .child(div().text_color(rgb(BLUE)).child(t("Command log")))
           .child(
             div()
               .flex_1()
@@ -193,7 +164,7 @@ impl Render for Lens {
               .child(t(&self.output_title)),
           )
           .child(self.button("copy", "Copy", true).on_click(cx.listener(|this, _, _, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(if this.show_log { this.logs.join("\n\n") } else { this.output.clone() }));
+            cx.write_to_clipboard(ClipboardItem::new_string(this.logs.join("\n\n")));
           }))),
       )
       .child(
@@ -207,7 +178,7 @@ impl Render for Lens {
           .p_3()
           .children(lines),
       );
-    let right = div()
+    let upper_panel = div()
       .flex_1()
       .min_w_0()
       .min_h_0()
@@ -275,7 +246,7 @@ impl Render for Lens {
                 .child(div().w(px(110.)).flex_shrink_0().child(t("STATE"))),
             )
             .child(pending)
-            .child(gpui_component::scroll::Scrollbar::vertical(&self.pending_scroll).scrollbar_show(gpui_component::scroll::ScrollbarShow::Always)),
+            .child(gpui_component::scroll::Scrollbar::vertical(&self.pending_scroll).mode(gpui_component::scroll::ScrollbarMode::Always)),
         )
         .child(
           div()
@@ -333,8 +304,15 @@ impl Render for Lens {
               .min_h_0(),
             ),
         )
-      })
-      .when(self.tab != Tab::Unpushed, |d| d.child(detail_panel));
+      });
+    let right = if self.show_log && self.tab != Tab::Unpushed {
+      v_resizable("content-command-log-split")
+        .child(resizable_panel().size_range(px(250.)..Pixels::MAX).child(upper_panel))
+        .child(resizable_panel().size(px(270.)).size_range(px(140.)..px(600.)).child(detail_panel))
+        .into_any_element()
+    } else {
+      upper_panel.into_any_element()
+    };
     div()
       .capture_key_down(cx.listener(Self::handle_shortcut))
       .size_full()
@@ -440,7 +418,13 @@ impl Render for Lens {
           )
           .child(div().flex().items_center().child(self.bookmark_toggle(cx)).child(self.bookmark_list(cx))),
       )
-      .child(div().flex().flex_1().min_h_0().child(sidebar).child(right))
+      .child(
+        div().flex().flex_1().min_h_0().child(
+          h_resizable("file-content-split")
+            .child(resizable_panel().visible(sidebar_visible).size(px(320.)).size_range(px(220.)..px(600.)).child(sidebar))
+            .child(resizable_panel().size_range(px(500.)..Pixels::MAX).child(right)),
+        ),
+      )
       .child(
         div()
           .h(px(30.))
