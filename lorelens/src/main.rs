@@ -109,6 +109,7 @@ struct Lens {
   refresh_pending: bool,
   logged_in_account: String,
   pending_push: Result<Vec<backend::LocalCommit>, String>,
+  pending_pull: Result<Vec<backend::LocalCommit>, String>,
 }
 
 impl Lens {
@@ -327,6 +328,7 @@ impl Lens {
             local_branches: Vec::new(),
             remote_branches: Vec::new(),
             pending_push: Err("Refresh to check pending push commits.".into()),
+            pending_pull: Err("Refresh to check incoming commits.".into()),
         };
     view.load_directory(cx);
     cx.observe(&cx.entity(), |this, _, cx| {
@@ -381,6 +383,7 @@ impl Lens {
     self.connected = false;
     self.selection.current = None;
     self.pending_push = Err("Refresh to check pending push commits.".into());
+    self.pending_pull = Err("Refresh to check incoming commits.".into());
     self.selection.paths.clear();
     self.selection.anchor = None;
     self.entries.clear();
@@ -394,6 +397,7 @@ impl Lens {
       cx.notify();
     });
     self.output.clear();
+    self.preview = PreviewState::default();
     self.output_title = "Repository opened".into();
     self.connect_after_load = backend::is_repository(&self.root);
     if self.connect_after_load {
@@ -578,6 +582,8 @@ impl Lens {
       return;
     }
     self.selection.select(path.clone());
+    self.preview.path = Some(path.clone());
+    self.preview.content.clear();
     self.output_title = path.clone();
     let root = self.root.clone();
     let file = root.join(&path);
@@ -592,7 +598,7 @@ impl Lens {
           return;
         }
         this.preview.finish();
-        this.output = result.unwrap_or_else(|e| tf("Preview unavailable: {error}\nUse Diff or File history for removed files.", &[("error", e.to_string())]));
+        this.preview.content = result.unwrap_or_else(|e| tf("Preview unavailable: {error}\nUse Diff or File history for removed files.", &[("error", e.to_string())]));
         cx.notify();
       });
     })

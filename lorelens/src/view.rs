@@ -5,7 +5,17 @@ impl Render for Lens {
     let rgb = palette(cx);
     let ready = !self.busy;
     let vcs = ready && self.connected;
+    let sync_count = |commits: &Result<Vec<backend::LocalCommit>, String>| {
+      if self.connected {
+        commits.as_ref().map(|items| items.len().to_string()).unwrap_or_else(|_| "?".into())
+      } else {
+        "?".into()
+      }
+    };
+    let sync_label = format!("{}  {} ↓", t("Sync"), sync_count(&self.pending_pull));
+    let push_label = format!("{}  {} ↑", t("Push"), sync_count(&self.pending_push));
     let staged = self.status.changes.iter().filter(|c| c.staged).count();
+    let has_logs = !self.logs.is_empty();
 
     let sidebar_visible = !self.root.as_os_str().is_empty();
     let sidebar = div().size_full().flex().when(sidebar_visible, |d| d.child(self.render_file_browser(cx)));
@@ -35,7 +45,7 @@ impl Render for Lens {
             } else if tab == Tab::History && this.connected {
               this.command(vec!["history".into(), "50".into(), "--oneline".into()], "Submitted revisions", false, false, cx);
             } else if tab == Tab::Files
-              && let Some(path) = this.selection.current.clone()
+              && let Some(path) = this.preview.path.clone().or_else(|| this.selection.current.clone())
             {
               this.select(path, cx);
             }
@@ -165,6 +175,10 @@ impl Render for Lens {
           )
           .child(self.button("copy", "Copy", true).on_click(cx.listener(|this, _, _, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(this.logs.join("\n\n")));
+          })))
+          .child(self.button("clear-command-log", "Clear", has_logs).on_click(cx.listener(|this, _, _, cx| {
+            this.logs.clear();
+            cx.notify();
           }))),
       )
       .child(
@@ -185,6 +199,32 @@ impl Render for Lens {
       .flex()
       .flex_col()
       .child(tabs)
+      .when(self.tab == Tab::Files, |d| {
+        d.child(div().px_3().py_2().bg(rgb(PANEL)).child(self.preview.path.clone().unwrap_or_else(|| t("File preview")))).child(
+          div()
+            .id("file-preview-content")
+            .flex_1()
+            .min_h_0()
+            .overflow_scroll()
+            .font_family("Consolas")
+            .text_size(px(12.))
+            .p_3()
+            .children(self.preview.content.lines().map(|line| div().min_h(px(20.)).child(line.to_string())).collect::<Vec<_>>()),
+        )
+      })
+      .when(self.tab == Tab::History, |d| {
+        d.child(div().px_3().py_2().bg(rgb(PANEL)).child(t("History"))).child(
+          div()
+            .id("history-content")
+            .flex_1()
+            .min_h_0()
+            .overflow_scroll()
+            .font_family("Consolas")
+            .text_size(px(12.))
+            .p_3()
+            .children(self.output.lines().map(|line| div().min_h(px(20.)).child(line.to_string())).collect::<Vec<_>>()),
+        )
+      })
       .when(self.tab == Tab::Pending, |d| {
         d.child(
           div()
@@ -372,20 +412,16 @@ impl Render for Lens {
           .child(self.app_menu("Repository", true, cx))
           .child(self.branch_menu(vcs, cx))
           .child(self.button("refresh", "Refresh", ready).on_click(cx.listener(|this, _, _, cx| this.refresh(cx))))
-          .child(self.button("sync", "Sync", vcs).on_click(cx.listener(|this, _, _, cx| {
+          .child(self.button("sync", "Sync", vcs).label(sync_label).on_click(cx.listener(|this, _, _, cx| {
             if !this.busy && this.connected {
               this.command(vec!["sync".into()], "Sync", false, true, cx);
             }
           })))
-          .child(self.button("push", "Push", vcs).on_click(cx.listener(|this, _, _, cx| {
+          .child(self.button("push", "Push", vcs).label(push_label).on_click(cx.listener(|this, _, _, cx| {
             if !this.busy && this.connected {
               this.command(vec!["push".into()], "Push", false, true, cx);
             }
           })))
-          .child(div().text_size(px(11.)).child(match &self.pending_push {
-            Ok(items) => format!("↑ {}", items.len()),
-            Err(_) => "↑ ?".into(),
-          }))
           .child(div().flex_1())
           .child(div().text_size(px(11.)).text_color(rgb(MUTED)).child(if self.connected {
             tf("Revision {revision}", &[("revision", self.status.revision.to_string())])

@@ -56,6 +56,8 @@ impl SelectionState {
 
 #[derive(Default)]
 pub(super) struct PreviewState {
+  pub path: Option<String>,
+  pub content: String,
   generation: u64,
   loading: bool,
 }

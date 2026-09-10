@@ -192,6 +192,14 @@ pub fn discard_local_commits(cli: &Path, root: &Path, identity: Option<&str>, br
 }
 
 pub fn pending_push(cli: &Path, root: &Path, status: &str, identity: Option<&str>) -> Result<Vec<LocalCommit>, String> {
+  pending_commits(cli, root, status, identity, false)
+}
+
+pub fn pending_pull(cli: &Path, root: &Path, status: &str, identity: Option<&str>) -> Result<Vec<LocalCommit>, String> {
+  pending_commits(cli, root, status, identity, true)
+}
+
+fn pending_commits(cli: &Path, root: &Path, status: &str, identity: Option<&str>, incoming: bool) -> Result<Vec<LocalCommit>, String> {
   let events: Vec<Value> = status
     .lines()
     .filter(|line| !line.trim().is_empty())
@@ -203,7 +211,13 @@ pub fn pending_push(cli: &Path, root: &Path, status: &str, identity: Option<&str
   if !flag("remoteAuthorized") {
     return Err("Remote status unavailable; check authentication.".into());
   }
-  if !flag("isLocalAhead") {
+  if incoming && !matches!(data["remoteBranchExist"], Value::Bool(_) | Value::Number(_)) {
+    return Err("Remote branch status unavailable.".into());
+  }
+  if incoming && (!flag("remoteBranchExist") || data["revisionLocal"].as_str().is_some_and(|local| Some(local) == data["revisionRemote"].as_str())) {
+    return Ok(Vec::new());
+  }
+  if !incoming && !flag("isLocalAhead") {
     return Ok(Vec::new());
   }
   let read_history = |revision: &str| -> Result<Vec<LocalCommit>, String> {
@@ -217,10 +231,52 @@ pub fn pending_push(cli: &Path, root: &Path, status: &str, identity: Option<&str
     Vec::new()
   };
   if local.len() >= 10000 || remote.len() >= 10000 {
-    return Err("History exceeds 10000 revisions; pending push count unavailable.".into());
+    return Err("History exceeds 10000 revisions; pending commit count unavailable.".into());
   }
-  let remote: std::collections::HashSet<_> = remote.into_iter().map(|commit| commit.hash).collect();
-  Ok(local.into_iter().filter(|commit| !remote.contains(&commit.hash)).collect())
+  Ok(if incoming { unique_commits(remote, local) } else { unique_commits(local, remote) })
+}
+
+fn unique_commits(source: Vec<LocalCommit>, known: Vec<LocalCommit>) -> Vec<LocalCommit> {
+  let known: std::collections::HashSet<_> = known.into_iter().map(|commit| commit.hash).collect();
+  source.into_iter().filter(|commit| !known.contains(&commit.hash)).collect()
+}
+
+#[cfg(test)]
+mod incoming_tests {
+  use super::*;
+
+  #[test]
+  fn compares_histories_in_both_directions_including_divergence() {
+    let commits = |hashes: &[&str]| {
+      hashes
+        .iter()
+        .map(|hash| LocalCommit {
+          hash: (*hash).into(),
+          number: String::new(),
+          message: String::new(),
+        })
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(unique_commits(commits(&["remote", "shared"]), commits(&["local", "shared"])), commits(&["remote"]));
+    assert!(unique_commits(commits(&["shared"]), commits(&["local", "shared"])).is_empty());
+    assert_eq!(unique_commits(commits(&["new", "shared"]), commits(&["shared"])), commits(&["new"]));
+  }
+
+  #[test]
+  fn incoming_status_handles_equal_missing_and_unauthorized_remotes() {
+    let query = |data: Value| {
+      let output = serde_json::json!({"tagName": "repositoryStatusRevision", "data": data}).to_string();
+      pending_pull(Path::new("missing-cli"), Path::new("."), &output, None)
+    };
+    assert!(
+      query(serde_json::json!({"remoteAuthorized": true, "remoteBranchExist": true, "revisionLocal": "same", "revisionRemote": "same"}))
+        .unwrap()
+        .is_empty()
+    );
+    assert!(query(serde_json::json!({"remoteAuthorized": 1, "remoteBranchExist": 0})).unwrap().is_empty());
+    assert!(query(serde_json::json!({"remoteAuthorized": false})).is_err());
+    assert!(query(serde_json::json!({"remoteAuthorized": true})).is_err());
+  }
 }
 
 fn parse_revision_history(output: &str) -> Result<Vec<LocalCommit>, String> {
