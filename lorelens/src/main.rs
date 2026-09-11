@@ -3,7 +3,7 @@ mod assets;
 #[cfg(target_os = "macos")]
 mod macos;
 mod state;
-use state::{PreviewState, SelectionState};
+use state::{PendingTreeRow, PreviewState, SelectionState};
 mod theme;
 use theme::{ColorRole::*, apply_theme, defer_theme, palette};
 mod backend;
@@ -99,6 +99,7 @@ struct Lens {
   cli: PathBuf,
   entries: Vec<Entry>,
   expanded_folders: std::collections::HashSet<PathBuf>,
+  collapsed_change_folders: std::collections::HashSet<String>,
   status: Status,
   locked_paths: std::collections::HashSet<String>,
   connected: bool,
@@ -116,6 +117,7 @@ struct Lens {
   pending_filter: Entity<TextInput>,
   selected_path: Entity<TextInput>,
   pending_visible: Vec<usize>,
+  pending_rows: Vec<PendingTreeRow>,
   notice: String,
   error: bool,
   show_log: bool,
@@ -343,11 +345,12 @@ impl Lens {
             status: Status::default(), connected: false, busy: false, silent_refresh: false, tab: Tab::Pending,
             locked_paths: Default::default(),
             expanded_folders: Default::default(),
+            collapsed_change_folders: Default::default(),
             selection: SelectionState::default(), preview: PreviewState::default(), output: "Open a folder to browse local files.\n\nFor version control, open a Lore repository and locate the Lore CLI.\nUse Sync to synchronize the current repository. Commits are not pushed automatically.".into(),
             file_history: history::FileHistoryState::default(),
             output_title: "Welcome to LoreLens".into(), logs: vec![],
             message: cx.new(|cx| TextInput::new("Describe your staged changes…", cx)),
-            filter, pending_filter, selected_path, pending_visible: Vec::new(), notice: "Opening repository…".into(), error: false, show_log, obliterate_enabled: false,
+            filter, pending_filter, selected_path, pending_visible: Vec::new(), pending_rows: Vec::new(), notice: "Opening repository…".into(), error: false, show_log, obliterate_enabled: false,
             settings, settings_error, branch_output: String::new(), show_branches: false,
             connect_after_load,
             startup_login_pending: false,
@@ -438,6 +441,7 @@ impl Lens {
     self.selection.anchor = None;
     self.entries.clear();
     self.expanded_folders.clear();
+    self.collapsed_change_folders.clear();
     self.branch_output.clear();
     self.local_branches.clear();
     self.remote_branches.clear();
@@ -702,27 +706,155 @@ impl Lens {
     !paths.is_empty() && paths.iter().all(|path| eligible.contains(path.as_str()))
   }
 
-  fn change_row(&self, index: usize, change: &Change, cx: &mut Context<Self>) -> Stateful<Div> {
+  fn pending_folder_row(&self, index: usize, path: String, name: String, depth: usize, change_index: Option<usize>, cx: &mut Context<Self>) -> Stateful<Div> {
+    let rgb = palette(cx);
+    let filtering = !self.pending_filter.read(cx).content.is_empty();
+    let expanded = !self.collapsed_change_folders.contains(&path) || filtering;
+    let folder_change = change_index.and_then(|index| self.status.changes.get(index));
+    let checkbox = folder_change.map(|change| (change_index.expect("folder change index"), change.path.clone()));
+    let selected = folder_change.is_some_and(|change| self.selection.paths.contains(&change.path));
+    let action = folder_change.map(|change| change.action.as_str()).unwrap_or("");
+    let state = folder_change.map_or("", |change| {
+      if change.conflict {
+        "Conflict"
+      } else if change.staged {
+        "Staged"
+      } else {
+        "Unstaged"
+      }
+    });
+    let context_path = path.clone();
+    let context_root = self.root.clone();
+    let view = cx.entity().downgrade();
+    div().id(("pending-folder-context", index)).child(
+      div()
+        .id(("pending-folder", index))
+        .flex()
+        .items_center()
+        .h(px(29.))
+        .px_3()
+        .gap_2()
+        .border_b_1()
+        .border_color(rgb(Divider))
+        .bg(rgb(if selected { Selected } else { PANEL }))
+        .when(!filtering, |row| row.cursor_pointer().hover(|style| style.bg(rgb(Hover))))
+        .child(div().w(px(16.)).flex_shrink_0().when_some(checkbox, |slot, (change_index, change_path)| {
+          let selected = self.selection.paths.contains(&change_path);
+          slot.child(
+            gpui_component::checkbox::Checkbox::new(("select-folder-change", change_index))
+              .checked(selected)
+              .disabled(self.busy)
+              .tab_stop(false)
+              .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                cx.stop_propagation();
+                if this.busy {
+                  return;
+                }
+                if *checked {
+                  this.selection.paths.insert(change_path.clone());
+                  this.selection.current = Some(change_path.clone());
+                } else {
+                  this.selection.paths.remove(&change_path);
+                  if this.selection.current.as_ref() == Some(&change_path) {
+                    this.selection.current = this.selection.paths.iter().next().cloned();
+                  }
+                }
+                this.selection.anchor = this.selection.current.clone();
+                this.preview.invalidate();
+                this.notice = tf("{count} items selected", &[("count", this.selection.paths.len().to_string())]);
+                cx.notify();
+              })),
+          )
+        }))
+        .child(div().w(px(depth as f32 * 16.)).flex_shrink_0())
+        .child(
+          div()
+            .w(px(16.))
+            .flex_shrink_0()
+            .text_color(rgb(MUTED))
+            .child(Icon::new(if expanded { IconName::ChevronDown } else { IconName::ChevronRight }).size(px(14.))),
+        )
+        .child(
+          div()
+            .w(px(16.))
+            .flex_shrink_0()
+            .text_color(rgb(Warning))
+            .child(Icon::new(if expanded { IconName::FolderOpen } else { IconName::Folder }).size(px(16.))),
+        )
+        .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().child(name))
+        .child(
+          div()
+            .w(px(90.))
+            .flex_shrink_0()
+            .text_size(px(11.))
+            .text_color(rgb(if matches!(action, "remove" | "delete") {
+              Danger
+            } else if matches!(action, "add" | "create") {
+              Success
+            } else {
+              MUTED
+            }))
+            .child(t(action)),
+        )
+        .child(
+          div()
+            .w(px(110.))
+            .flex_shrink_0()
+            .text_size(px(11.))
+            .text_color(rgb(if state == "Conflict" {
+              Danger
+            } else if state == "Staged" {
+              Success
+            } else {
+              MUTED
+            }))
+            .child(t(state)),
+        )
+        .on_click(cx.listener(move |this, _, window, cx| {
+          window.focus(&this.pending_focus, cx);
+          if this.busy || !this.pending_filter.read(cx).content.is_empty() {
+            return;
+          }
+          if !this.collapsed_change_folders.remove(&path) {
+            this.collapsed_change_folders.insert(path.clone());
+          }
+          cx.notify();
+        }))
+        .context_menu(move |menu, _, cx| {
+          let enabled = view.upgrade().is_some_and(|entity| {
+            let lens = entity.read(cx);
+            !lens.busy && lens.root == context_root && !state::pending_folder_paths(&lens.status.changes, &context_path).is_empty()
+          });
+          let select_view = view.clone();
+          let select_root = context_root.clone();
+          let select_path = context_path.clone();
+          menu.item(PopupMenuItem::new(t("Select all files in folder")).disabled(!enabled).on_click(move |_, _, cx| {
+            let _ = select_view.update(cx, |this, cx| {
+              if this.busy || this.root != select_root {
+                return;
+              }
+              let paths = state::pending_folder_paths(&this.status.changes, &select_path);
+              if paths.is_empty() {
+                return;
+              }
+              this.selection.select_all(&paths);
+              this.preview.invalidate();
+              this.notice = tf("{count} items selected", &[("count", paths.len().to_string())]);
+              cx.notify();
+            });
+          }))
+        }),
+    )
+  }
+
+  fn change_row(&self, index: usize, change: &Change, name: &str, depth: usize, cx: &mut Context<Self>) -> Stateful<Div> {
     let path = change.path.clone();
     let context_path = path.clone();
     let context_root = self.root.clone();
     let view = cx.entity().downgrade();
     div().id(("pending-context", index)).child(
       self
-        .row(
-          index,
-          &change.path,
-          &change.action,
-          if change.conflict {
-            "Conflict"
-          } else if change.staged {
-            "Staged"
-          } else {
-            "Unstaged"
-          },
-          &change.node_type,
-          cx,
-        )
+        .row(index, change, name, depth, cx)
         .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
           window.focus(&this.pending_focus, cx);
           if this.busy {
@@ -734,7 +866,14 @@ impl Lens {
             this.select(path.clone(), cx);
             return;
           }
-          let visible: Vec<_> = this.pending_visible.iter().map(|index| this.status.changes[*index].path.clone()).collect();
+          let visible: Vec<_> = this
+            .pending_rows
+            .iter()
+            .filter_map(|row| match row {
+              PendingTreeRow::Change { index, .. } => Some(this.status.changes[*index].path.clone()),
+              PendingTreeRow::Folder { .. } => None,
+            })
+            .collect();
           // Selection shared with the file browser must stay within this list.
           let visible_set: std::collections::HashSet<_> = visible.iter().collect();
           this.selection.paths.retain(|p| visible_set.contains(p));
@@ -900,18 +1039,25 @@ impl Lens {
     )
   }
 
-  fn row(&self, index: usize, path: &str, action: &str, state: &str, node_type: &str, cx: &App) -> Stateful<Div> {
+  fn row(&self, index: usize, change: &Change, name: &str, depth: usize, cx: &App) -> Stateful<Div> {
     let rgb = palette(cx);
-    let kind = match node_type.to_ascii_lowercase().as_str() {
+    let kind = match change.node_type.to_ascii_lowercase().as_str() {
       "directory" | "folder" => "Folder",
       "file" => "File",
       "link" => "Link",
-      _ => match std::fs::symlink_metadata(self.root.join(path)) {
+      _ => match std::fs::symlink_metadata(self.root.join(&change.path)) {
         Ok(meta) if meta.file_type().is_symlink() => "Link",
         Ok(meta) if meta.is_dir() => "Folder",
         Ok(meta) if meta.is_file() => "File",
         _ => "Unknown type",
       },
+    };
+    let state = if change.conflict {
+      "Conflict"
+    } else if change.staged {
+      "Staged"
+    } else {
+      "Unstaged"
     };
     div()
       .id(("file-row", index))
@@ -922,15 +1068,17 @@ impl Lens {
       .gap_2()
       .border_b_1()
       .border_color(rgb(Divider))
-      .bg(rgb(if self.selection.paths.contains(path) { Selected } else { PANEL }))
+      .bg(rgb(if self.selection.paths.contains(&change.path) { Selected } else { PANEL }))
       .cursor_pointer()
       .hover(|s| s.bg(rgb(Hover)))
       .child(
         gpui_component::checkbox::Checkbox::new(("select-change", index))
-          .checked(self.selection.paths.contains(path))
+          .checked(self.selection.paths.contains(&change.path))
           .disabled(self.busy)
           .tab_stop(false),
       )
+      .child(div().w(px(depth as f32 * 16.)).flex_shrink_0())
+      .child(div().w(px(16.)).flex_shrink_0())
       .child(
         div().w(px(16.)).flex_shrink_0().text_color(rgb(if kind == "Folder" { Warning } else { MUTED })).child(
           gpui_component::Icon::new(match kind {
@@ -941,20 +1089,20 @@ impl Lens {
           .size(px(16.)),
         ),
       )
-      .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().child(path.to_string()))
+      .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().child(name.to_string()))
       .child(
         div()
           .w(px(90.))
           .flex_shrink_0()
           .text_size(px(11.))
-          .text_color(rgb(if matches!(action, "remove" | "delete") {
+          .text_color(rgb(if matches!(change.action.as_str(), "remove" | "delete") {
             Danger
-          } else if matches!(action, "add" | "create") {
+          } else if matches!(change.action.as_str(), "add" | "create") {
             Success
           } else {
             MUTED
           }))
-          .child(t(action)),
+          .child(t(&change.action)),
       )
       .child(
         div()

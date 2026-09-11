@@ -133,6 +133,7 @@ impl Lens {
         self.directory.clear();
         self.entries.clear();
         self.expanded_folders.clear();
+        self.collapsed_change_folders.clear();
         self.selection.clear();
         self.status = Status::default();
         self.connected = false;

@@ -81,14 +81,14 @@ impl Lens {
               .item(PopupMenuItem::new(t("Delete local branch…")).disabled(is_current).on_click(move |_, window, cx| {
                 let _ = delete_view.update(cx, |this, cx| {
                   if this.root == delete_root {
-                    this.archive_branch_dialog(delete_branch.clone(), false, window, cx);
+                    this.archive_branch_dialog(delete_branch.clone(), commands::BranchArchiveScope::Local, window, cx);
                   }
                 });
               }))
               .item(PopupMenuItem::new(t("Archive branch…")).disabled(is_current).on_click(move |_, window, cx| {
                 let _ = archive_view.update(cx, |this, cx| {
                   if this.root == archive_root {
-                    this.archive_branch_dialog(archive_branch.clone(), true, window, cx);
+                    this.archive_branch_dialog(archive_branch.clone(), commands::BranchArchiveScope::LocalAndRemote, window, cx);
                   }
                 });
               }))
@@ -112,17 +112,29 @@ impl Lens {
               let checkout_branch = branch.clone();
               let checkout_view = branch_view.clone();
               let checkout_root = branch_root.clone();
-              branch_menu.item(
-                PopupMenuItem::new(if available_locally { t("Available locally") } else { t("Check out branch") })
-                  .disabled(available_locally)
-                  .on_click(move |_, _, cx| {
-                    let _ = checkout_view.update(cx, |this, cx| {
-                      if this.root == checkout_root && !this.local_branches.contains(&checkout_branch) && this.remote_branches.contains(&checkout_branch) {
-                        this.command(commands::switch_branch_args(checkout_branch.clone()), "Check out remote branch", false, true, cx);
-                      }
-                    });
-                  }),
-              )
+              let delete_branch = branch.clone();
+              let delete_view = branch_view.clone();
+              let delete_root = branch_root.clone();
+              branch_menu
+                .item(
+                  PopupMenuItem::new(if available_locally { t("Available locally") } else { t("Check out branch") })
+                    .disabled(available_locally)
+                    .on_click(move |_, _, cx| {
+                      let _ = checkout_view.update(cx, |this, cx| {
+                        if this.root == checkout_root && !this.local_branches.contains(&checkout_branch) && this.remote_branches.contains(&checkout_branch) {
+                          this.command(commands::switch_branch_args(checkout_branch.clone()), "Check out remote branch", false, true, cx);
+                        }
+                      });
+                    }),
+                )
+                .separator()
+                .item(PopupMenuItem::new(t("Delete remote branch…")).on_click(move |_, window, cx| {
+                  let _ = delete_view.update(cx, |this, cx| {
+                    if this.root == delete_root {
+                      this.archive_branch_dialog(delete_branch.clone(), commands::BranchArchiveScope::Remote, window, cx);
+                    }
+                  });
+                }))
             });
           }
           submenu

@@ -1147,15 +1147,24 @@ impl Lens {
     });
   }
 
-  pub(super) fn archive_branch_dialog(&mut self, branch: String, remote: bool, window: &mut Window, cx: &mut Context<Self>) {
-    if self.busy || !self.connected || branch == self.status.branch || !self.local_branches.contains(&branch) {
+  pub(super) fn archive_branch_dialog(&mut self, branch: String, scope: commands::BranchArchiveScope, window: &mut Window, cx: &mut Context<Self>) {
+    let branch_exists = match scope {
+      commands::BranchArchiveScope::Local => self.local_branches.contains(&branch),
+      commands::BranchArchiveScope::Remote => self.remote_branches.contains(&branch),
+      commands::BranchArchiveScope::LocalAndRemote => self.local_branches.contains(&branch),
+    };
+    let archives_local = matches!(scope, commands::BranchArchiveScope::Local | commands::BranchArchiveScope::LocalAndRemote);
+    if self.busy || !self.connected || !branch_exists || archives_local && branch == self.status.branch {
       return;
     }
     let root = self.root.clone();
     let current = self.status.branch.clone();
     let view = cx.entity().downgrade();
-    let title = if remote { "Archive branch" } else { "Delete local branch" };
-    let confirm = if remote { "Archive" } else { "Delete" };
+    let (title, confirm) = match scope {
+      commands::BranchArchiveScope::Local => ("Delete local branch", "Delete"),
+      commands::BranchArchiveScope::Remote => ("Delete remote branch", "Delete"),
+      commands::BranchArchiveScope::LocalAndRemote => ("Archive branch", "Archive"),
+    };
     window.open_dialog(cx, move |dialog, _, _| {
       let branch = branch.clone();
       let root = root.clone();
@@ -1166,33 +1175,31 @@ impl Lens {
         .close_button(false)
         .overlay_closable(false)
         .footer(dialog_footer("archive-branch-confirm", t(confirm), true))
-        .child(if remote {
-          tf(
-            "Archive branch '{branch}' locally and remotely? It will no longer appear in active branch lists.",
-            &[("branch", branch.clone())],
-          )
-        } else {
-          tf(
+        .child(match scope {
+          commands::BranchArchiveScope::Local => tf(
             "Delete local branch '{branch}'? The remote branch will be kept and can be restored by switching to it later.",
             &[("branch", branch.clone())],
-          )
+          ),
+          commands::BranchArchiveScope::Remote => tf("Delete remote branch '{branch}'? Any local branch with the same name will be kept.", &[("branch", branch.clone())]),
+          commands::BranchArchiveScope::LocalAndRemote => tf(
+            "Archive branch '{branch}' locally and remotely? It will no longer appear in active branch lists.",
+            &[("branch", branch.clone())],
+          ),
         })
         .child(t("Unmerged revisions may later be removed by garbage collection."))
         .on_ok(move |_, _, cx| {
           view
             .update(cx, |this, cx| {
-              if this.busy || !this.connected || this.root != root || this.status.branch != current || !this.local_branches.contains(&branch) {
+              let branch_exists = match scope {
+                commands::BranchArchiveScope::Local => this.local_branches.contains(&branch),
+                commands::BranchArchiveScope::Remote => this.remote_branches.contains(&branch),
+                commands::BranchArchiveScope::LocalAndRemote => this.local_branches.contains(&branch),
+              };
+              let archives_local = matches!(scope, commands::BranchArchiveScope::Local | commands::BranchArchiveScope::LocalAndRemote);
+              if this.busy || !this.connected || this.root != root || this.status.branch != current || !branch_exists || archives_local && branch == this.status.branch {
                 return false;
               }
-              if branch == this.status.branch {
-                return false;
-              }
-              let mut args = vec!["branch".into(), "archive".into()];
-              if !remote {
-                args.push("--local".into());
-              }
-              args.extend(["--".into(), branch.clone()]);
-              this.command(args, title, false, true, cx);
+              this.command(commands::archive_branch_args(branch.clone(), scope), title, false, true, cx);
               true
             })
             .unwrap_or(false)

@@ -69,6 +69,11 @@ impl Render for Lens {
       .filter(|(_, change)| pending_query.is_empty() || change.path.to_lowercase().contains(&pending_query) || change.action.to_lowercase().contains(&pending_query))
       .map(|(index, _)| index)
       .collect();
+    self.pending_rows = if pending_query.is_empty() {
+      state::pending_tree_rows(&self.status.changes, &self.pending_visible, &self.collapsed_change_folders)
+    } else {
+      state::pending_tree_rows(&self.status.changes, &self.pending_visible, &Default::default())
+    };
     let visible_paths: Vec<_> = self.pending_visible.iter().map(|index| self.status.changes[*index].path.clone()).collect();
     let all_visible_selected = !visible_paths.is_empty() && visible_paths.iter().all(|path| self.selection.paths.contains(path));
     let visible_count = visible_paths.len();
@@ -101,16 +106,16 @@ impl Render for Lens {
       .flex_col()
       .overflow_hidden()
       .bg(rgb(PANEL));
-    if !self.pending_visible.is_empty() {
+    if !self.pending_rows.is_empty() {
       pending = pending.child(
         uniform_list(
           "pending-rows",
-          self.pending_visible.len(),
+          self.pending_rows.len(),
           cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
             range
-              .map(|i| {
-                let change_index = this.pending_visible[i];
-                this.change_row(change_index, &this.status.changes[change_index], cx)
+              .map(|i| match this.pending_rows[i].clone() {
+                PendingTreeRow::Folder { path, name, depth, change_index } => this.pending_folder_row(i, path, name, depth, change_index, cx),
+                PendingTreeRow::Change { index, name, depth } => this.change_row(index, &this.status.changes[index], &name, depth, cx),
               })
               .collect::<Vec<_>>()
           }),
@@ -121,7 +126,7 @@ impl Render for Lens {
         .track_scroll(&self.pending_scroll),
       );
     }
-    if self.pending_visible.is_empty() {
+    if self.pending_rows.is_empty() {
       let (title, description) = if !self.connected {
         ("Open a repository", "Open a Lore repository and Refresh to view pending changes.")
       } else if self.busy {
@@ -358,12 +363,13 @@ impl Render for Lens {
                 .text_color(rgb(MUTED))
                 .child(div().w(px(16.)).flex_shrink_0())
                 .child(div().w(px(16.)).flex_shrink_0())
+                .child(div().w(px(16.)).flex_shrink_0())
                 .child(div().flex_1().min_w_0().child(t("FILE / PATH")))
                 .child(div().w(px(90.)).flex_shrink_0().child(t("ACTION")))
                 .child(div().w(px(110.)).flex_shrink_0().child(t("STATE"))),
             )
             .child(pending)
-            .when(visible_count > 0, |list| {
+            .when(!self.pending_rows.is_empty(), |list| {
               list.child(gpui_component::scroll::Scrollbar::vertical(&self.pending_scroll).mode(gpui_component::scroll::ScrollbarMode::Always))
             }),
         )

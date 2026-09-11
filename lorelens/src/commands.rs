@@ -43,6 +43,24 @@ pub(crate) fn switch_branch_args(branch: String) -> Vec<String> {
   vec!["branch".into(), "switch".into(), "--".into(), branch]
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum BranchArchiveScope {
+  Local,
+  Remote,
+  LocalAndRemote,
+}
+
+pub(crate) fn archive_branch_args(branch: String, scope: BranchArchiveScope) -> Vec<String> {
+  let mut args = vec!["branch".into(), "archive".into()];
+  match scope {
+    BranchArchiveScope::Local => args.push("--local".into()),
+    BranchArchiveScope::Remote => args.push("--remote".into()),
+    BranchArchiveScope::LocalAndRemote => {}
+  }
+  args.extend(["--".into(), branch]);
+  args
+}
+
 struct CommandResult {
   result: Result<String, String>,
   entries: Option<Result<Vec<Entry>, String>>,
@@ -54,7 +72,7 @@ struct CommandResult {
 
 #[cfg(test)]
 mod tests {
-  use super::{CommandKind, switch_branch_args};
+  use super::{BranchArchiveScope, CommandKind, archive_branch_args, switch_branch_args};
   #[test]
   fn command_behavior_is_derived_from_arguments() {
     let cases = [
@@ -85,6 +103,13 @@ mod tests {
     let args = switch_branch_args("feat-account-login".into());
     assert_eq!(args, ["branch", "switch", "--", "feat-account-login"]);
     assert!(!args.iter().any(|arg| arg == "--local"));
+  }
+
+  #[test]
+  fn branch_archive_scope_selects_the_expected_data_source() {
+    assert_eq!(archive_branch_args("topic".into(), BranchArchiveScope::Local), ["branch", "archive", "--local", "--", "topic"]);
+    assert_eq!(archive_branch_args("topic".into(), BranchArchiveScope::Remote), ["branch", "archive", "--remote", "--", "topic"]);
+    assert_eq!(archive_branch_args("topic".into(), BranchArchiveScope::LocalAndRemote), ["branch", "archive", "--", "topic"]);
   }
 }
 
