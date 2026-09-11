@@ -1139,10 +1139,63 @@ impl Lens {
               if branch == this.status.branch {
                 return true;
               }
-              this.command(vec!["branch".into(), "switch".into(), "--local".into(), "--".into(), branch], "Switch local branch", false, true, cx);
+              this.command(commands::switch_branch_args(branch), "Switch local branch", false, true, cx);
               true
             })
             .unwrap_or(true)
+        })
+    });
+  }
+
+  pub(super) fn archive_branch_dialog(&mut self, branch: String, remote: bool, window: &mut Window, cx: &mut Context<Self>) {
+    if self.busy || !self.connected || branch == self.status.branch || !self.local_branches.contains(&branch) {
+      return;
+    }
+    let root = self.root.clone();
+    let current = self.status.branch.clone();
+    let view = cx.entity().downgrade();
+    let title = if remote { "Archive branch" } else { "Delete local branch" };
+    let confirm = if remote { "Archive" } else { "Delete" };
+    window.open_dialog(cx, move |dialog, _, _| {
+      let branch = branch.clone();
+      let root = root.clone();
+      let current = current.clone();
+      let view = view.clone();
+      dialog
+        .title(t(title))
+        .close_button(false)
+        .overlay_closable(false)
+        .footer(dialog_footer("archive-branch-confirm", t(confirm), true))
+        .child(if remote {
+          tf(
+            "Archive branch '{branch}' locally and remotely? It will no longer appear in active branch lists.",
+            &[("branch", branch.clone())],
+          )
+        } else {
+          tf(
+            "Delete local branch '{branch}'? The remote branch will be kept and can be restored by switching to it later.",
+            &[("branch", branch.clone())],
+          )
+        })
+        .child(t("Unmerged revisions may later be removed by garbage collection."))
+        .on_ok(move |_, _, cx| {
+          view
+            .update(cx, |this, cx| {
+              if this.busy || !this.connected || this.root != root || this.status.branch != current || !this.local_branches.contains(&branch) {
+                return false;
+              }
+              if branch == this.status.branch {
+                return false;
+              }
+              let mut args = vec!["branch".into(), "archive".into()];
+              if !remote {
+                args.push("--local".into());
+              }
+              args.extend(["--".into(), branch.clone()]);
+              this.command(args, title, false, true, cx);
+              true
+            })
+            .unwrap_or(false)
         })
     });
   }

@@ -134,6 +134,136 @@ pub fn run_as(cli: &Path, root: &Path, args: &[String], json: bool, identity: Op
   Ok(if stderr.trim().is_empty() || json { stdout } else { format!("{stdout}\n{stderr}") })
 }
 
+pub fn run_branch_switch_skipping_unavailable(cli: &Path, root: &Path, args: &[String], identity: Option<&str>) -> Result<String, String> {
+  run_branch_switch_skipping_unavailable_with(root, || run_as(cli, root, args, false, identity))
+}
+
+fn run_branch_switch_skipping_unavailable_with<F>(root: &Path, mut run: F) -> Result<String, String>
+where
+  F: FnMut() -> Result<String, String>,
+{
+  const MAX_SKIPPED_FILES: usize = 64;
+  let mut skipped = Vec::new();
+  loop {
+    match run() {
+      Ok(output) if skipped.is_empty() => return Ok(output),
+      Ok(output) => {
+        let paths = skipped.iter().map(|path| format!("  {path}")).collect::<Vec<_>>().join("\n");
+        return Ok(format!(
+          "{}\n\nLoreLens completed the branch switch with {} unavailable file(s) excluded:\n{}\nThe paths were added to the local view filter. Remove them from {} after the missing content is restored.",
+          output.trim_end(),
+          skipped.len(),
+          paths,
+          repository_view_path(root).display()
+        ));
+      }
+      Err(error) => {
+        let Some(path) = unavailable_sync_path(&error) else {
+          return Err(with_skipped_paths(error, root, &skipped));
+        };
+        if skipped.contains(&path) {
+          return Err(with_skipped_paths(format!("{error}\n\nLore still attempted to materialize the excluded path {path}."), root, &skipped));
+        }
+        if skipped.len() >= MAX_SKIPPED_FILES {
+          return Err(with_skipped_paths(
+            format!("{error}\n\nBranch switch stopped after excluding {MAX_SKIPPED_FILES} unavailable files."),
+            root,
+            &skipped,
+          ));
+        }
+        append_view_exclusion(root, &path).map_err(|view_error| format!("{error}\n\nCould not exclude unavailable path {path}: {view_error}"))?;
+        skipped.push(path);
+      }
+    }
+  }
+}
+
+fn unavailable_sync_path(error: &str) -> Option<String> {
+  if !error.contains("Address not found:") {
+    return None;
+  }
+  error.lines().find_map(|line| {
+    let raw = line.split_once(" - Failed to sync file ").map(|(_, path)| path)?;
+    normalize_repository_relative_path(raw)
+  })
+}
+
+fn normalize_repository_relative_path(raw: &str) -> Option<String> {
+  let path = raw.trim().replace('\\', "/");
+  if path.is_empty() || path.starts_with('/') || path.get(1..2) == Some(":") {
+    return None;
+  }
+  let components = path.split('/').collect::<Vec<_>>();
+  if components.iter().any(|component| component.is_empty() || matches!(*component, "." | ".."))
+    || components
+      .first()
+      .is_some_and(|component| component.eq_ignore_ascii_case(".lore") || component.eq_ignore_ascii_case(".urc"))
+  {
+    return None;
+  }
+  Some(components.join("/"))
+}
+
+fn repository_view_path(root: &Path) -> PathBuf {
+  let metadata = if root.join(".lore").is_dir() { ".lore" } else { ".urc" };
+  root.join(metadata).join("view")
+}
+
+fn view_exclusion(path: &str) -> String {
+  let mut pattern = String::from("/");
+  for character in path.chars() {
+    if matches!(character, '*' | '?' | '[' | ']' | '\\') {
+      pattern.push('\\');
+    }
+    pattern.push(character);
+  }
+  pattern
+}
+
+fn append_view_exclusion(root: &Path, path: &str) -> Result<(), String> {
+  let view = repository_view_path(root);
+  let parent = view.parent().ok_or_else(|| "Invalid repository view path.".to_string())?;
+  if !parent.is_dir() {
+    return Err(format!("Repository metadata directory not found: {}", parent.display()));
+  }
+  let canonical_root = root.canonicalize().map_err(|error| format!("Cannot resolve repository root {}: {error}", root.display()))?;
+  let canonical_parent = parent.canonicalize().map_err(|error| format!("Cannot resolve repository metadata {}: {error}", parent.display()))?;
+  if !canonical_parent.starts_with(&canonical_root) {
+    return Err(format!("Repository metadata is outside the repository root: {}", parent.display()));
+  }
+  match fs::symlink_metadata(&view) {
+    Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => return Err(format!("Refusing to overwrite non-regular view file: {}", view.display())),
+    Ok(_) => {}
+    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+    Err(error) => return Err(format!("Cannot inspect {}: {error}", view.display())),
+  }
+  let original = match fs::read_to_string(&view) {
+    Ok(contents) => contents,
+    Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+    Err(error) => return Err(format!("Cannot read {}: {error}", view.display())),
+  };
+  let pattern = view_exclusion(path);
+  let mut updated = original.clone();
+  if !updated.is_empty() && !updated.ends_with(['\n', '\r']) {
+    updated.push('\n');
+  }
+  updated.push_str("# LoreLens: unavailable content skipped during branch switch\n");
+  updated.push_str(&pattern);
+  updated.push('\n');
+  fs::write(&view, updated).map_err(|error| format!("Cannot update {}: {error}", view.display()))
+}
+
+fn with_skipped_paths(error: String, root: &Path, skipped: &[String]) -> String {
+  if skipped.is_empty() {
+    return error;
+  }
+  let paths = skipped.iter().map(|path| format!("  {path}")).collect::<Vec<_>>().join("\n");
+  format!(
+    "{error}\n\nLoreLens excluded these unavailable paths in {} before retrying:\n{paths}",
+    repository_view_path(root).display()
+  )
+}
+
 fn obliterate_address_from_error(error: &str) -> Option<&str> {
   let address = error.split_once("Address not found:")?.1.lines().next()?.trim();
   (!address.is_empty() && address.bytes().all(|byte| byte.is_ascii_hexdigit() || byte == b'-')).then_some(address)
@@ -230,5 +360,50 @@ mod path_tests {
     assert_eq!(canonicalize_change_paths(Path::new("missing-root"), &args).unwrap(), args);
     let args = ["reset", "--revision", "main"].map(str::to_owned);
     assert_eq!(canonicalize_change_paths(Path::new("missing-root"), &args).unwrap(), args);
+  }
+
+  #[test]
+  fn extracts_only_safe_unavailable_sync_paths() {
+    let error = "[Error] Failed to synchronize state during branch switch: Address not found: abc-123\n  at lore-revision/src/fs/realize.rs:992 - Failed to sync file Plugins/Marketplace/AnimGenExample/Content/Characters/UEFN_Mannequin/Animations/Civ/Civ_Loc_WalkStrafe_Neutral_Male_T1.uasset";
+    assert_eq!(
+      unavailable_sync_path(error).as_deref(),
+      Some("Plugins/Marketplace/AnimGenExample/Content/Characters/UEFN_Mannequin/Animations/Civ/Civ_Loc_WalkStrafe_Neutral_Male_T1.uasset")
+    );
+    assert!(unavailable_sync_path("Address not found: abc\n at x - Failed to sync file ../outside").is_none());
+    assert!(unavailable_sync_path("at x - Failed to sync file safe/file.uasset").is_none());
+  }
+
+  #[test]
+  fn appends_an_exact_local_view_exclusion_without_replacing_existing_rules() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    fs::create_dir(root.join(".lore")).unwrap();
+    fs::write(root.join(".lore/view"), "**\n!Plugins/**").unwrap();
+    append_view_exclusion(root, "Plugins/Test[1]/asset?.uasset").unwrap();
+    assert_eq!(
+      fs::read_to_string(root.join(".lore/view")).unwrap(),
+      "**\n!Plugins/**\n# LoreLens: unavailable content skipped during branch switch\n/Plugins/Test\\[1\\]/asset\\?.uasset\n"
+    );
+  }
+
+  #[test]
+  fn retries_branch_switch_after_excluding_only_the_unavailable_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    fs::create_dir(root.join(".lore")).unwrap();
+    let mut attempts = 0;
+    let output = run_branch_switch_skipping_unavailable_with(root, || {
+      attempts += 1;
+      if attempts == 1 {
+        Err("[Error] Address not found: abc-123\n at realize.rs:992 - Failed to sync file Content/Broken.uasset".into())
+      } else {
+        Ok("Switched to branch feat-test".into())
+      }
+    })
+    .unwrap();
+    assert_eq!(attempts, 2);
+    assert!(output.contains("Switched to branch feat-test"));
+    assert!(output.contains("Content/Broken.uasset"));
+    assert!(fs::read_to_string(root.join(".lore/view")).unwrap().ends_with("/Content/Broken.uasset\n"));
   }
 }

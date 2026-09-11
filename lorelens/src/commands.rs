@@ -6,6 +6,7 @@ enum CommandKind {
   Logout,
   Account,
   ListBranches,
+  ArchiveBranch,
   Sync,
   SwitchBranch,
   Merge,
@@ -21,6 +22,7 @@ impl CommandKind {
       (Some("auth"), Some("clear")) => Self::Logout,
       (Some("auth"), Some("info")) => Self::Account,
       (Some("branch"), Some("list")) => Self::ListBranches,
+      (Some("branch"), Some("archive")) => Self::ArchiveBranch,
       (Some("sync"), _) => Self::Sync,
       (Some("branch"), Some("switch")) => Self::SwitchBranch,
       (Some("branch"), Some("merge")) => Self::Merge,
@@ -37,6 +39,10 @@ impl CommandKind {
   }
 }
 
+pub(crate) fn switch_branch_args(branch: String) -> Vec<String> {
+  vec!["branch".into(), "switch".into(), "--".into(), branch]
+}
+
 struct CommandResult {
   result: Result<String, String>,
   entries: Option<Result<Vec<Entry>, String>>,
@@ -48,7 +54,7 @@ struct CommandResult {
 
 #[cfg(test)]
 mod tests {
-  use super::CommandKind;
+  use super::{CommandKind, switch_branch_args};
   #[test]
   fn command_behavior_is_derived_from_arguments() {
     let cases = [
@@ -56,7 +62,8 @@ mod tests {
       (vec!["auth", "clear"], CommandKind::Logout),
       (vec!["auth", "info"], CommandKind::Account),
       (vec!["branch", "list"], CommandKind::ListBranches),
-      (vec!["branch", "switch", "--local"], CommandKind::SwitchBranch),
+      (vec!["branch", "archive", "topic"], CommandKind::ArchiveBranch),
+      (vec!["branch", "switch", "--", "topic"], CommandKind::SwitchBranch),
       (vec!["branch", "merge"], CommandKind::Merge),
       (vec!["sync"], CommandKind::Sync),
       (vec!["commit"], CommandKind::Commit),
@@ -71,6 +78,13 @@ mod tests {
     assert!(CommandKind::Account.is_authentication());
     assert!(CommandKind::SwitchBranch.changes_worktree());
     assert!(!CommandKind::ListBranches.changes_worktree());
+  }
+
+  #[test]
+  fn branch_switch_can_fetch_a_missing_local_latest_from_remote() {
+    let args = switch_branch_args("feat-account-login".into());
+    assert_eq!(args, ["branch", "switch", "--", "feat-account-login"]);
+    assert!(!args.iter().any(|arg| arg == "--local"));
   }
 }
 
@@ -170,7 +184,13 @@ impl Lens {
                   return Err(format!("[stage-validation] {error}"));
                 }
               }
-              match backend::run_as(&cli, &root, &args, status || authentication || branches, if login { None } else { identity.as_deref() }) {
+              let branch_switch = args.first().is_some_and(|arg| arg == "branch") && args.get(1).is_some_and(|arg| arg == "switch");
+              let result = if branch_switch {
+                backend::run_branch_switch_skipping_unavailable(&cli, &root, &args, if login { None } else { identity.as_deref() })
+              } else {
+                backend::run_as(&cli, &root, &args, status || authentication || branches, if login { None } else { identity.as_deref() })
+              };
+              match result {
                 Ok(output) => {
                   outputs.push(output);
                   if args.len() == 5 && args[0] == "branch" && args[1] == "merge" && args[2] == "resolve" && args[3] == "--" {
@@ -398,7 +418,7 @@ impl Lens {
               e.clone()
             };
             this.log(e);
-            if resets_files || matches!(kind, CommandKind::Merge | CommandKind::Obliterate) {
+            if resets_files || matches!(kind, CommandKind::ArchiveBranch | CommandKind::SwitchBranch | CommandKind::Merge | CommandKind::Obliterate) {
               this.refresh_pending = true;
               this.pending_refresh_silent = false;
             }
