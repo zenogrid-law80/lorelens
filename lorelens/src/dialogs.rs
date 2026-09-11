@@ -335,6 +335,161 @@ impl Lens {
     });
   }
 
+  pub(super) fn deduplicate_files_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let paths = backend::duplicate_change_paths(&self.status.changes);
+    self.deduplicate_paths_dialog(paths, window, cx);
+  }
+
+  fn deduplicate_paths_dialog(&mut self, mut paths: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+    if self.busy || !self.connected {
+      return;
+    }
+    paths.sort();
+    paths.dedup();
+    let duplicates = backend::duplicate_change_paths(&self.status.changes);
+    if paths.is_empty() || !paths.iter().all(|path| duplicates.contains(path)) {
+      return;
+    }
+    let root = self.root.clone();
+    let branch = self.status.branch.clone();
+    let revision = self.status.revision.clone();
+    let identity = self.settings.identity.clone();
+    let commands = backend::deduplicate_commands(&paths);
+    let local_files = match backend::duplicate_local_files(&self.root, &self.status.changes, &paths) {
+      Ok(files) => files,
+      Err(error) => {
+        self.error = true;
+        self.notice = "Deduplication failed · see details".into();
+        self.log(error);
+        cx.notify();
+        return;
+      }
+    };
+    let unrelated_staged = self.status.changes.iter().any(|change| change.staged && !paths.contains(&change.path));
+    let validation = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+    let view = cx.entity().downgrade();
+    window.open_dialog(cx, move |dialog, _, _| {
+      let (paths, root, branch, revision, identity, commands, local_files, validation, view) = (
+        paths.clone(),
+        root.clone(),
+        branch.clone(),
+        revision.clone(),
+        identity.clone(),
+        commands.clone(),
+        local_files.clone(),
+        validation.clone(),
+        view.clone(),
+      );
+      let error = t(&validation.borrow());
+      dialog
+        .title(t("Deduplicate Files"))
+        .close_button(false)
+        .overlay_closable(false)
+        .footer(dialog_footer("deduplicate-files-confirm", t("Deduplicate Files"), true))
+        .child(
+          div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(root.display().to_string())
+            .child(tf("{count} duplicate Change paths found", &[("count", paths.len().to_string())]))
+            .child(t("Only paths that appear at least twice in Changes are included."))
+            .child(
+              div()
+                .id("deduplicate-paths")
+                .max_h(px(180.))
+                .overflow_y_scroll()
+                .children(paths.iter().map(|path| div().child(path.clone()))),
+            )
+            .when(!local_files.is_empty(), |d| {
+              d.child(t("Files with both delete Staged and keep Unstaged states will be deleted locally before the workflow runs."))
+                .child(
+                  div()
+                    .id("deduplicate-local-files")
+                    .max_h(px(140.))
+                    .overflow_y_scroll()
+                    .children(local_files.iter().map(|path| div().child(path.clone()))),
+                )
+            })
+            .child(t(
+              "This workflow stages the listed files, commits them as \"Remove unavailable local server binaries\", pushes the commit, refreshes status, and verifies the repository.",
+            ))
+            .child(
+              div()
+                .id("deduplicate-commands")
+                .max_h(px(180.))
+                .overflow_y_scroll()
+                .children(commands.iter().map(|args| div().child(lore_command_label(args)))),
+            )
+            .when(unrelated_staged, |d| {
+              d.child(t("Other staged files must be unstaged first so they are not included in the automatic commit."))
+            })
+            .child(error),
+        )
+        .on_ok(move |_, window, cx| {
+          let (paths, root, branch, revision, identity, commands, validation) = (paths.clone(), root.clone(), branch.clone(), revision.clone(), identity.clone(), commands.clone(), validation.clone());
+          view
+            .update(cx, move |this, cx| {
+              let current_paths = backend::duplicate_change_paths(&this.status.changes);
+              if this.busy
+                || !this.connected
+                || this.root != root
+                || this.status.branch != branch
+                || this.status.revision != revision
+                || this.settings.identity != identity
+                || !paths.iter().all(|path| current_paths.contains(path))
+              {
+                *validation.borrow_mut() = "Repository state changed. Reopen this dialog.".into();
+                window.refresh();
+                return false;
+              }
+              if this.status.changes.iter().any(|change| change.staged && !paths.contains(&change.path)) {
+                *validation.borrow_mut() = "Other staged files must be unstaged first so they are not included in the automatic commit.".into();
+                window.refresh();
+                return false;
+              }
+              this.busy = true;
+              this.error = false;
+              this.notice = "Deduplicating files…".into();
+              this.preview.invalidate();
+              for args in &commands {
+                this.log(lore_command_label(args));
+              }
+              let cli = this.cli.clone();
+              let task = cx
+                .background_executor()
+                .spawn(async move { backend::deduplicate_files(&cli, &root, identity.as_deref(), &branch, &revision, &paths) });
+              cx.spawn(async move |this, cx| {
+                let result = task.await;
+                let _ = this.update(cx, |this, cx| {
+                  this.busy = false;
+                  this.output_title = "Deduplicate Files".into();
+                  match result {
+                    Ok(output) => {
+                      this.output = output;
+                      this.notice = "Duplicate Change entries removed and pushed.".into();
+                      this.log(t("Duplicate Change entries removed and pushed."));
+                    }
+                    Err(error) => {
+                      this.output = error.clone();
+                      this.error = true;
+                      this.notice = "Deduplication failed · see details".into();
+                      this.log(error);
+                    }
+                  }
+                  this.refresh(cx);
+                  cx.notify();
+                });
+              })
+              .detach();
+              cx.notify();
+              true
+            })
+            .unwrap_or(false)
+        })
+    });
+  }
+
   pub(super) fn folder_changes_dialog(&mut self, targets: Vec<String>, action: &'static str, window: &mut Window, cx: &mut Context<Self>) {
     if self.busy || !self.connected {
       return;
@@ -1295,6 +1450,19 @@ impl Lens {
         })
     });
   }
+}
+
+fn lore_command_label(args: &[String]) -> String {
+  if args.first().is_some_and(|arg| arg == "stage") && args.len() > 1 {
+    let paths = args[1..].iter().map(|arg| format!("{arg:?}")).collect::<Vec<_>>().join("`\n");
+    return format!("lore stage `\n{paths}");
+  }
+  let args = args
+    .iter()
+    .map(|arg| if arg.chars().any(char::is_whitespace) { format!("{arg:?}") } else { arg.clone() })
+    .collect::<Vec<_>>()
+    .join(" ");
+  format!("lore {args}")
 }
 
 // Pass explicit files to the CLI so a non-recursive choice cannot expand a folder.
