@@ -14,6 +14,7 @@ mod commands;
 mod dialogs;
 mod external_tools;
 mod file_browser;
+mod history;
 mod i18n;
 mod input;
 mod menus;
@@ -81,6 +82,11 @@ enum Tab {
   Unpushed,
 }
 
+enum DiffRetry {
+  Working { root: PathBuf, path: String },
+  History { root: PathBuf, path: String, older: String, newer: String },
+}
+
 struct Lens {
   files_focus: FocusHandle,
   pending_focus: FocusHandle,
@@ -101,6 +107,7 @@ struct Lens {
   tab: Tab,
   selection: SelectionState,
   preview: PreviewState,
+  file_history: history::FileHistoryState,
   output: String,
   output_title: String,
   logs: Vec<String>,
@@ -178,7 +185,7 @@ impl Lens {
     self.command(vec!["commit".into(), "--".into(), message], "Commit", false, true, cx);
   }
 
-  fn choose_tool(&mut self, tool: String, retry: Option<(PathBuf, String)>, cx: &mut Context<Self>) {
+  fn choose_tool(&mut self, tool: String, retry: Option<DiffRetry>, cx: &mut Context<Self>) {
     let prompt = cx.prompt_for_paths(PathPromptOptions {
       files: true,
       directories: false,
@@ -207,11 +214,12 @@ impl Lens {
                 }
                 this.notice = tf("Saved {tool}: {path}", &[("tool", tool.to_string()), ("path", path.display().to_string())]);
                 this.error = false;
-                if let Some((root, file)) = retry
-                  && this.root == root
-                  && this.settings.external_tool == tool
-                {
-                  this.external_diff(file, cx);
+                if this.settings.external_tool == tool {
+                  match retry {
+                    Some(DiffRetry::Working { root, path }) if this.root == root => this.external_diff(path, cx),
+                    Some(DiffRetry::History { root, path, older, newer }) if this.root == root && this.file_history.matches_pair(&path, &older, &newer) => this.diff_selected_history(cx),
+                    _ => {}
+                  }
                 }
               }
             }
@@ -249,7 +257,7 @@ impl Lens {
     };
     let display_name = if tool == "custom" { self.settings.custom_tool_name.clone() } else { tool.clone() };
     let Some(executable) = external_tools::resolve(&tool, configured) else {
-      self.choose_tool(tool, Some((root, path)), cx);
+      self.choose_tool(tool, Some(DiffRetry::Working { root, path }), cx);
       return;
     };
     self.preview.invalidate();
@@ -336,6 +344,7 @@ impl Lens {
             locked_paths: Default::default(),
             expanded_folders: Default::default(),
             selection: SelectionState::default(), preview: PreviewState::default(), output: "Open a folder to browse local files.\n\nFor version control, open a Lore repository and locate the Lore CLI.\nUse Sync to synchronize the current repository. Commits are not pushed automatically.".into(),
+            file_history: history::FileHistoryState::default(),
             output_title: "Welcome to LoreLens".into(), logs: vec![],
             message: cx.new(|cx| TextInput::new("Describe your staged changes…", cx)),
             filter, pending_filter, selected_path, pending_visible: Vec::new(), notice: "Opening repository…".into(), error: false, show_log, obliterate_enabled: false,
@@ -439,6 +448,7 @@ impl Lens {
     });
     self.output.clear();
     self.preview = PreviewState::default();
+    self.file_history = history::FileHistoryState::default();
     self.output_title = "Repository opened".into();
     self.connect_after_load = backend::is_repository(&self.root);
     if self.connect_after_load {
@@ -582,6 +592,12 @@ impl Lens {
   }
 
   fn file_command(&mut self, command: &str, window: &mut Window, cx: &mut Context<Self>) {
+    if command == "history" {
+      if let Some(path) = self.selection.current.clone() {
+        self.open_file_history(path, 100, cx);
+      }
+      return;
+    }
     if command == "diff" {
       if let Some(path) = self.selection.current.clone() {
         self.resolve_or_diff(path, window, cx);
@@ -601,19 +617,8 @@ impl Lens {
         self.folder_changes_dialog(targets, if command == "stage" { "stage" } else { "unstage" }, window, cx);
         return;
       }
-      let args = match command {
-        "history" => vec!["file".into(), "history".into(), "--".into(), path, "50".into()],
-        _ => {
-          let mut paths: Vec<_> = self.selection.paths.iter().cloned().collect();
-          paths.sort();
-          if paths.is_empty() {
-            paths.push(path);
-          }
-          let mut args = vec![command.into(), "--".into()];
-          args.extend(paths);
-          args
-        }
-      };
+      let mut args = vec![command.into(), "--".into()];
+      args.extend(targets);
       self.command(args, command, false, matches!(command, "stage" | "unstage"), cx);
     }
   }
@@ -623,6 +628,10 @@ impl Lens {
       return;
     }
     self.selection.select(path.clone());
+    if self.tab == Tab::History {
+      self.open_file_history(path, 100, cx);
+      return;
+    }
     self.preview.path = Some(path.clone());
     self.preview.content.clear();
     self.output_title = path.clone();

@@ -365,6 +365,7 @@ impl Lens {
             if mutation {
               if kind.changes_worktree() {
                 this.selection.clear();
+                this.file_history = history::FileHistoryState::default();
                 if !this.directory.is_dir() {
                   this.directory = this.root.clone();
                 }

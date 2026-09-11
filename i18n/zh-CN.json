@@ -1,4 +1,12 @@
 {
+  "File History": "文件历史",
+  "Diff Selected": "比较所选版本",
+  "Select two different revisions.": "请选择两个不同的版本。",
+  "Load more": "加载更多",
+  "Select a repository file to view its history.": "请选择仓库中的文件以查看历史。",
+  "Loading file history…": "正在加载文件历史…",
+  "No file history found.": "没有文件历史。",
+  "Select two revisions with Ctrl/Shift or checkboxes, then right-click and choose Diff Selected.": "使用 Ctrl/Shift 或复选框选择两个版本，然后右键选择比较所选版本。",
   "Filter changes…": "筛选更改…",
   "Working tree clean": "工作区干净",
   "No pending changes": "没有待处理的更改",

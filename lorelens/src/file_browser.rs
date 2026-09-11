@@ -449,6 +449,18 @@ impl Lens {
                 let copy_paths = selected_paths.iter().map(|path| context_root.join(path).to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
                 menu = menu.item(PopupMenuItem::new(t("Copy selected full paths")).on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy_paths.clone()))));
               }
+              if !directory {
+                let history_view = view.clone();
+                let history_root = context_root.clone();
+                let history_path = context_relative.clone();
+                menu = menu.item(PopupMenuItem::new(t("File History")).disabled(!bulk_enabled).on_click(move |_, _, cx| {
+                  let _ = history_view.update(cx, |this, cx| {
+                    if this.root == history_root {
+                      this.open_file_history(history_path.clone(), 100, cx);
+                    }
+                  });
+                }));
+              }
               if !directory
                 && view.upgrade().is_some_and(|entity| {
                   let lens = entity.read(cx);

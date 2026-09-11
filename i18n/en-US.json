@@ -1,4 +1,12 @@
 {
+  "File History": "File History",
+  "Diff Selected": "Diff Selected",
+  "Select two different revisions.": "Select two different revisions.",
+  "Load more": "Load more",
+  "Select a repository file to view its history.": "Select a repository file to view its history.",
+  "Loading file history…": "Loading file history…",
+  "No file history found.": "No file history found.",
+  "Select two revisions with Ctrl/Shift or checkboxes, then right-click and choose Diff Selected.": "Select two revisions with Ctrl/Shift or checkboxes, then right-click and choose Diff Selected.",
   "Filter changes…": "Filter changes…",
   "Working tree clean": "Working tree clean",
   "No pending changes": "No pending changes",

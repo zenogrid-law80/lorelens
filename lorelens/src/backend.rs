@@ -2,6 +2,7 @@ mod binary_merge;
 mod cli;
 mod deduplicate;
 mod filesystem;
+mod history;
 mod ignore;
 mod obliterate;
 mod reset;
@@ -24,6 +25,7 @@ pub fn list_tree(root: &Path, expanded: &std::collections::HashSet<PathBuf>) -> 
 }
 pub use cli::{find_cli, run_as};
 pub use deduplicate::{deduplicate_commands, deduplicate_files, duplicate_change_paths, duplicate_local_files};
+pub use history::{FileRevision, file_history};
 pub use obliterate::obliterate_args;
 pub use reset::reset_commands;
 pub fn cleanup_resolved_merge(cli: &Path, root: &Path, relative: &str, identity: Option<&str>) -> Result<(), String> {

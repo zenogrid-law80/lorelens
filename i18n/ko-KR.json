@@ -1,4 +1,12 @@
 {
+  "File History": "파일 히스토리",
+  "Diff Selected": "선택한 버전 비교",
+  "Select two different revisions.": "서로 다른 두 버전을 선택하세요.",
+  "Load more": "더 불러오기",
+  "Select a repository file to view its history.": "히스토리를 볼 저장소 파일을 선택하세요.",
+  "Loading file history…": "파일 히스토리를 불러오는 중…",
+  "No file history found.": "파일 히스토리가 없습니다.",
+  "Select two revisions with Ctrl/Shift or checkboxes, then right-click and choose Diff Selected.": "Ctrl/Shift 또는 체크박스로 두 버전을 선택한 뒤, 우클릭하여 선택한 버전 비교를 실행하세요.",
   "Filter changes…": "변경 사항 필터…",
   "Working tree clean": "작업 트리가 깨끗합니다",
   "No pending changes": "대기 중인 변경 사항이 없습니다",

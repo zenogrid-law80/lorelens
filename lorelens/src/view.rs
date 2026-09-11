@@ -45,8 +45,12 @@ impl Render for Lens {
             this.tab = tab;
             if tab == Tab::Unpushed && this.connected {
               this.refresh(cx);
-            } else if tab == Tab::History && this.connected {
-              this.command(vec!["history".into(), "50".into(), "--oneline".into()], "Submitted revisions", false, false, cx);
+            } else if tab == Tab::History {
+              if let Some(path) = this.selection.current.clone() {
+                this.open_file_history(path, 100, cx);
+              } else {
+                this.file_history = history::FileHistoryState::default();
+              }
             } else if tab == Tab::Files
               && let Some(path) = this.preview.path.clone().or_else(|| this.selection.current.clone())
             {
@@ -277,19 +281,7 @@ impl Render for Lens {
             .children(self.preview.content.lines().map(|line| div().min_h(px(20.)).child(line.to_string())).collect::<Vec<_>>()),
         )
       })
-      .when(self.tab == Tab::History, |d| {
-        d.child(div().px_3().py_2().bg(rgb(PANEL)).child(t("History"))).child(
-          div()
-            .id("history-content")
-            .flex_1()
-            .min_h_0()
-            .overflow_scroll()
-            .font_family(gpui_component::Theme::global(cx).mono_font_family.clone())
-            .text_size(px(12.))
-            .p_3()
-            .children(self.output.lines().map(|line| div().min_h(px(20.)).child(line.to_string())).collect::<Vec<_>>()),
-        )
-      })
+      .when(self.tab == Tab::History, |d| d.child(self.render_file_history(cx)))
       .when(self.tab == Tab::Pending, |d| {
         d.child(
           div()

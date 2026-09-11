@@ -201,6 +201,81 @@ pub fn diff(cli: &Path, root: &Path, relative: &str, revision: &str, identity: O
   Ok(())
 }
 
+fn write_revision_snapshot(cli: &Path, root: &Path, relative: &str, revision: &crate::backend::FileRevision, output: &Path, identity: Option<&str>) -> Result<(), String> {
+  if matches!(revision.action.to_ascii_lowercase().as_str(), "delete" | "remove") {
+    return fs::write(output, []).map_err(|error| error.to_string());
+  }
+  crate::backend::run_as(
+    cli,
+    root,
+    &[
+      "file".into(),
+      "write".into(),
+      "--path".into(),
+      relative.into(),
+      "--revision".into(),
+      revision.hash.clone(),
+      "--output".into(),
+      output.to_string_lossy().into_owned(),
+    ],
+    false,
+    identity,
+  )?;
+  Ok(())
+}
+
+pub fn diff_revisions(
+  cli: &Path,
+  root: &Path,
+  relative: &str,
+  older: &crate::backend::FileRevision,
+  newer: &crate::backend::FileRevision,
+  identity: Option<&str>,
+  tool: Tool<'_>,
+) -> Result<(), String> {
+  if older.hash == newer.hash {
+    return Err(crate::i18n::t("Select two different revisions."));
+  }
+  let temporary = tempfile::Builder::new().prefix("lorelens-history-diff-").tempdir().map_err(|error| error.to_string())?;
+  let name = Path::new(relative).file_name().ok_or_else(|| crate::i18n::t("Select a file to compare"))?;
+  let snapshot = |label: &str, revision: &crate::backend::FileRevision| -> Result<std::path::PathBuf, String> {
+    let directory = temporary.path().join(format!("{label}-r{}", revision.number));
+    fs::create_dir(&directory).map_err(|error| error.to_string())?;
+    Ok(directory.join(name))
+  };
+  let base = snapshot("older", older)?;
+  let yours = snapshot("newer", newer)?;
+  let theirs = temporary.path().join("newer").join(name);
+  let result = temporary.path().join("result").join(name);
+  fs::create_dir(theirs.parent().unwrap()).map_err(|error| error.to_string())?;
+  fs::create_dir(result.parent().unwrap()).map_err(|error| error.to_string())?;
+  write_revision_snapshot(cli, root, relative, older, &base, identity)?;
+  write_revision_snapshot(cli, root, relative, newer, &yours, identity)?;
+  fs::copy(&yours, &theirs).map_err(|error| error.to_string())?;
+  fs::copy(&yours, &result).map_err(|error| error.to_string())?;
+  let mut command = Command::new(tool.executable);
+  command
+    .current_dir(root)
+    .args(arguments(tool.name, tool.custom_arguments, false, &base, &theirs, &yours, &result)?)
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null());
+  #[cfg(windows)]
+  {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(0x08000000);
+  }
+  let mut child = command
+    .spawn()
+    .map_err(|error| format!("Cannot start {}: {error}. Check its executable path in Options > Diff / Merge.", tool.name))?;
+  // Diff tools can keep both snapshots open after their launcher process exits.
+  let _ = temporary.keep();
+  std::thread::spawn(move || {
+    let _ = child.wait();
+  });
+  Ok(())
+}
+
 pub fn merge(root: &Path, relative: &str, tool: Tool<'_>) -> Result<(), String> {
   let root = root.canonicalize().map_err(|e| e.to_string())?;
   let result = root.join(relative);
@@ -281,5 +356,19 @@ mod tests {
       vec!["--wait", "base 한글.txt", "local file.txt", "result.txt"]
     );
     assert!(arguments("unknown", None, false, b, t, y, r).is_err());
+  }
+
+  #[test]
+  fn deleted_revision_exports_as_an_empty_snapshot_without_invoking_lore() {
+    let temporary = tempfile::tempdir().unwrap();
+    let output = temporary.path().join("deleted.txt");
+    let revision = crate::backend::FileRevision {
+      hash: "a".repeat(64),
+      number: 7,
+      action: "delete".into(),
+      message: "Delete file".into(),
+    };
+    write_revision_snapshot(Path::new("missing-lore"), temporary.path(), "deleted.txt", &revision, &output, None).unwrap();
+    assert_eq!(fs::read(output).unwrap(), Vec::<u8>::new());
   }
 }
