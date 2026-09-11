@@ -382,10 +382,10 @@ impl Lens {
       );
       let error = t(&validation.borrow());
       dialog
-        .title(t("Deduplicate Files"))
+        .title(t("Reset Files"))
         .close_button(false)
         .overlay_closable(false)
-        .footer(dialog_footer("deduplicate-files-confirm", t("Deduplicate Files"), true))
+        .footer(dialog_footer("deduplicate-files-confirm", t("Reset Files"), true))
         .child(
           div()
             .flex()
@@ -463,7 +463,7 @@ impl Lens {
                 let result = task.await;
                 let _ = this.update(cx, |this, cx| {
                   this.busy = false;
-                  this.output_title = "Deduplicate Files".into();
+                  this.output_title = "Reset Files".into();
                   match result {
                     Ok(output) => {
                       this.output = output;

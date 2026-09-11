@@ -85,6 +85,7 @@ struct Lens {
   files_focus: FocusHandle,
   pending_focus: FocusHandle,
   files_scroll: ScrollHandle,
+  command_log_scroll: ScrollHandle,
   pending_scroll: UniformListScrollHandle,
   folder_to_select: Option<PathBuf>,
   root: PathBuf,
@@ -327,6 +328,7 @@ impl Lens {
             files_focus: cx.focus_handle(),
             pending_focus: cx.focus_handle(),
             files_scroll: ScrollHandle::new(),
+            command_log_scroll: ScrollHandle::new(),
             pending_scroll: UniformListScrollHandle::new(),
             folder_to_select: None,
             directory: root.clone(), root, cli: settings.cli.clone().filter(|path| path.is_file()).unwrap_or_else(backend::find_cli), entries: vec![],
@@ -771,6 +773,22 @@ impl Lens {
             return menu;
           }
           let shortcut_settings = view.upgrade().map(|entity| entity.read(cx).settings.shortcuts.clone()).unwrap_or_default();
+          if view
+            .upgrade()
+            .is_some_and(|entity| backend::duplicate_change_paths(&entity.read(cx).status.changes).contains(&context_path))
+          {
+            let reset_view = view.clone();
+            let reset_root = context_root.clone();
+            let reset_path = context_path.clone();
+            menu = menu.item(PopupMenuItem::new(t("Reset Files")).on_click(move |_, window, cx| {
+              let _ = reset_view.update(cx, |this, cx| {
+                if this.root == reset_root && backend::duplicate_change_paths(&this.status.changes).contains(&reset_path) {
+                  // The clicked row opens the repository-wide duplicate workflow.
+                  this.deduplicate_files_dialog(window, cx);
+                }
+              });
+            }));
+          }
           if !stage_paths.is_empty() {
             let view = view.clone();
             let root = context_root.clone();

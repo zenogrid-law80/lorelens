@@ -40,7 +40,7 @@
   "Reset files": "Reset files",
   "Reset folder": "Reset folder",
   "Reset selected files": "Reset selected files",
-  "Deduplicate Files": "Deduplicate Files",
+  "Reset Files": "Reset Files",
   "{count} duplicate Change paths found": "{count} duplicate Change paths found",
   "Only paths that appear at least twice in Changes are included.": "Only paths that appear at least twice in Changes are included.",
   "Files with both delete Staged and keep Unstaged states will be deleted locally before the workflow runs.": "Files with both delete Staged and keep Unstaged states will be deleted locally before the workflow runs.",

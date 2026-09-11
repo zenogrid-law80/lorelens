@@ -40,7 +40,7 @@
   "Reset files": "重置文件（Reset）",
   "Reset folder": "重置文件夹（Reset）",
   "Reset selected files": "重置所选文件（Reset）",
-  "Deduplicate Files": "清理重复文件",
+  "Reset Files": "重置文件",
   "{count} duplicate Change paths found": "发现 {count} 个重复的更改路径",
   "Only paths that appear at least twice in Changes are included.": "仅包含在更改中至少出现两次的路径。",
   "Files with both delete Staged and keep Unstaged states will be deleted locally before the workflow runs.": "同时处于 delete Staged 和 keep Unstaged 状态的文件将在运行该流程前从本地删除。",

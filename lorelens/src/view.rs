@@ -14,7 +14,6 @@ impl Render for Lens {
     };
     let sync_label = format!("{}  {}", t("Sync"), sync_count(&self.pending_pull));
     let push_label = format!("{}  {}", t("Push"), sync_count(&self.pending_push));
-    let deduplicate = vcs && !backend::duplicate_change_paths(&self.status.changes).is_empty();
     let staged = self.status.changes.iter().filter(|c| c.staged).count();
     let has_logs = !self.logs.is_empty();
 
@@ -232,14 +231,26 @@ impl Render for Lens {
       )
       .child(
         div()
-          .id("detail-scroll")
+          .relative()
           .flex_1()
           .min_h_0()
-          .overflow_scroll()
-          .font_family(gpui_component::Theme::global(cx).mono_font_family.clone())
-          .text_size(px(12.))
-          .p_3()
-          .children(lines),
+          .overflow_hidden()
+          .flex()
+          .flex_col()
+          .child(
+            div()
+              .id("detail-scroll")
+              .track_scroll(&self.command_log_scroll)
+              .flex_1()
+              .min_h_0()
+              .overflow_scroll()
+              .font_family(gpui_component::Theme::global(cx).mono_font_family.clone())
+              .text_size(px(12.))
+              .p_3()
+              .pr(px(24.))
+              .children(lines),
+          )
+          .child(gpui_component::scroll::Scrollbar::vertical(&self.command_log_scroll).mode(gpui_component::scroll::ScrollbarMode::Always)),
       );
     let upper_panel = div()
       .size_full()
@@ -527,12 +538,6 @@ impl Render for Lens {
                   this.command(vec!["push".into()], "Push", false, true, cx);
                 }
               })),
-          )
-          .child(
-            self
-              .button("deduplicate-files", "Deduplicate Files", deduplicate)
-              .h(px(36.))
-              .on_click(cx.listener(|this, _, window, cx| this.deduplicate_files_dialog(window, cx))),
           )
           .child(div().flex_1())
           .child(div().text_size(px(11.)).text_color(rgb(MUTED)).child(if self.connected {
