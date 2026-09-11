@@ -130,8 +130,11 @@ impl Lens {
     self.silent_refresh = silent;
     self.error = false;
     if !silent {
-      self.notice = tf("Running {command}…", &[("command", args.join(" "))]);
-      self.log(format!("lore {}", args.join(" ")));
+      let command = if commands.len() == 1 { args.join(" ") } else { title.to_owned() };
+      self.notice = tf("Running {command}…", &[("command", command)]);
+      for command in &commands {
+        self.log(format!("lore {}", command.join(" ")));
+      }
     }
     let root = self.root.clone();
     let cli = self.cli.clone();
@@ -142,32 +145,49 @@ impl Lens {
     let text_encoding = self.settings.text_encoding.clone();
     let text_extensions = self.settings.text_extensions.clone();
     let kind = CommandKind::from_args(&args);
+    let resets_files = commands.iter().any(|args| args.first().is_some_and(|arg| arg == "reset"));
     let authentication = kind.is_authentication();
     let login = kind == CommandKind::Login;
     let login_remote = if login { args.get(1).cloned() } else { None };
     let branches = kind == CommandKind::ListBranches;
     let task = cx.background_executor().spawn(async move {
-      let result = (|| {
-        let mut outputs = Vec::new();
-        for args in commands {
-          if args.first().is_some_and(|arg| arg == "stage") {
-            let separator = args.iter().position(|arg| arg == "--").map_or(1, |index| index + 1);
-            if let Err(error) = backend::validate_text_files(&root, &args[separator..], &text_extensions, &text_line_ending, &text_encoding) {
-              return Err(format!("[stage-validation] {error}"));
-            }
-          }
-          match backend::run_as(&cli, &root, &args, status || authentication || branches, if login { None } else { identity.as_deref() }) {
-            Ok(output) => {
-              outputs.push(output);
-              if args.len() == 5 && args[0] == "branch" && args[1] == "merge" && args[2] == "resolve" && args[3] == "--" {
-                backend::cleanup_resolved_merge(&cli, &root, &args[4], identity.as_deref())?;
+      let (reset_placeholders, prepare_error) = if resets_files {
+        match backend::prepare_reset_paths(&root, &commands) {
+          Ok(paths) => (paths, None),
+          Err(error) => (Vec::new(), Some(error)),
+        }
+      } else {
+        (Vec::new(), None)
+      };
+      let result = prepare_error.map_or_else(
+        || {
+          (|| {
+            let mut outputs = Vec::new();
+            for args in commands {
+              if args.first().is_some_and(|arg| arg == "stage") {
+                let separator = args.iter().position(|arg| arg == "--").map_or(1, |index| index + 1);
+                if let Err(error) = backend::validate_text_files(&root, &args[separator..], &text_extensions, &text_line_ending, &text_encoding) {
+                  return Err(format!("[stage-validation] {error}"));
+                }
+              }
+              match backend::run_as(&cli, &root, &args, status || authentication || branches, if login { None } else { identity.as_deref() }) {
+                Ok(output) => {
+                  outputs.push(output);
+                  if args.len() == 5 && args[0] == "branch" && args[1] == "merge" && args[2] == "resolve" && args[3] == "--" {
+                    backend::cleanup_resolved_merge(&cli, &root, &args[4], identity.as_deref())?;
+                  }
+                }
+                Err(error) => return Err(format!("{}\n{}: {error}", outputs.join("\n"), args.join(" "))),
               }
             }
-            Err(error) => return Err(format!("{}\n{}: {error}", outputs.join("\n"), args.join(" "))),
-          }
-        }
-        Ok(outputs.join("\n"))
-      })();
+            Ok(outputs.join("\n"))
+          })()
+        },
+        Err,
+      );
+      if result.is_err() {
+        backend::cleanup_reset_paths(&reset_placeholders);
+      }
       let identity_update = if authentication && backend::is_repository(&root) {
         result
           .as_ref()
@@ -322,9 +342,16 @@ impl Lens {
                 }
               }
             } else {
+              let fallback_command = output
+                .lines()
+                .find_map(|line| line.strip_prefix("Fallback: ").or_else(|| line.strip_prefix("Fallback failed: ")))
+                .map(str::to_owned);
               this.output = if output.trim().is_empty() { "Command completed successfully.".into() } else { output };
               this.output_title = title.clone();
               this.notice = tf("{title} completed", &[("title", t(&title))]);
+              if let Some(command) = fallback_command {
+                this.log(command);
+              }
             }
             if !silent_refresh {
               this.log(this.notice.clone());
@@ -370,7 +397,7 @@ impl Lens {
               e.clone()
             };
             this.log(e);
-            if matches!(kind, CommandKind::Merge | CommandKind::Obliterate) {
+            if resets_files || matches!(kind, CommandKind::Merge | CommandKind::Obliterate) {
               this.refresh_pending = true;
               this.pending_refresh_silent = false;
             }

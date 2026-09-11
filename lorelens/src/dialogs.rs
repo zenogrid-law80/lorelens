@@ -359,6 +359,7 @@ impl Lens {
     let title = match action {
       "stage" => "Stage folder",
       "unstage" => "Unstage folder",
+      "reset" => "Reset folder",
       _ => "Revert folder",
     };
     window.open_dialog(cx, move |dialog, _, _| {
@@ -434,13 +435,13 @@ impl Lens {
                 window.refresh();
                 return false;
               }
-              let mut args = vec![action.into()];
               if action == "reset" {
-                args.push("--purge".into());
+                this.command_batch(backend::reset_commands(&this.root, &paths), title, false, true, cx);
+              } else {
+                let mut args = vec![action.into(), "--".into()];
+                args.extend(paths.iter().cloned());
+                this.command(args, title, false, true, cx);
               }
-              args.push("--".into());
-              args.extend(paths.iter().cloned());
-              this.command(args, title, false, true, cx);
               true
             })
             .unwrap_or(false)
@@ -623,6 +624,23 @@ impl Lens {
   }
 
   pub(super) fn revert_dialog(&mut self, paths: Vec<String>, unstage_only: bool, window: &mut Window, cx: &mut Context<Self>) {
+    let title = if unstage_only {
+      "Unstage"
+    } else if paths.len() > 1 {
+      "Revert selected files"
+    } else {
+      "Revert file"
+    };
+    self.file_changes_dialog(paths, unstage_only, title, window, cx);
+  }
+
+  pub(super) fn reset_dialog(&mut self, paths: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+    self.file_changes_dialog(paths, false, "Reset files", window, cx);
+  }
+
+  fn file_changes_dialog(&mut self, mut paths: Vec<String>, unstage_only: bool, title: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+    paths.sort();
+    paths.dedup();
     if self.busy || !self.connected {
       return;
     }
@@ -644,13 +662,6 @@ impl Lens {
     let revision = self.status.revision.clone();
     let branch = self.status.branch.clone();
     let view = cx.entity().downgrade();
-    let title = if unstage_only {
-      "Unstage"
-    } else if paths.len() > 1 {
-      "Revert selected files"
-    } else {
-      "Revert file"
-    };
     let validation = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
     window.open_dialog(cx, move |dialog, _, _| {
       let paths = paths.clone();
@@ -702,14 +713,15 @@ impl Lens {
                 window.refresh();
                 return false;
               }
-              let mut args = if unstage_only {
-                vec!["unstage".into(), "--".into()]
+              let commands = if unstage_only {
+                let mut args = vec!["unstage".into(), "--".into()];
+                args.extend(paths.iter().cloned());
+                vec![args]
               } else {
-                vec!["reset".into(), "--purge".into(), "--".into()]
+                backend::reset_commands(&this.root, &paths)
               };
-              args.extend(paths.iter().cloned());
               this.selection.clear();
-              this.command(args, title, false, true, cx);
+              this.command_batch(commands, title, false, true, cx);
               true
             })
             .unwrap_or(true)

@@ -3,6 +3,7 @@ mod cli;
 mod filesystem;
 mod ignore;
 mod obliterate;
+mod reset;
 pub use binary_merge::{BinarySide, is_binary_merge, select_binary_merge};
 pub fn list_tree(root: &Path, expanded: &std::collections::HashSet<PathBuf>) -> Result<Vec<Entry>, String> {
   fn walk(root: &Path, dir: &Path, expanded: &std::collections::HashSet<PathBuf>, result: &mut Vec<Entry>) -> Result<(), String> {
@@ -22,6 +23,7 @@ pub fn list_tree(root: &Path, expanded: &std::collections::HashSet<PathBuf>) -> 
 }
 pub use cli::{find_cli, run_as};
 pub use obliterate::obliterate_args;
+pub use reset::reset_commands;
 pub fn cleanup_resolved_merge(cli: &Path, root: &Path, relative: &str, identity: Option<&str>) -> Result<(), String> {
   let output = run_as(cli, root, &["status".into(), "--scan".into()], true, identity)?;
   let events = output
@@ -69,6 +71,39 @@ pub fn is_repository(root: &Path) -> bool {
   root.join(".lore").is_dir() || root.join(".urc").is_dir()
 }
 pub use filesystem::{copy_entries, delete_entry, list_directory, preview, validate_text_files};
+
+/// Create placeholders for selected reset targets that are missing from disk.
+/// Lore needs a filesystem node to resolve staged deletions during reset.
+pub fn prepare_reset_paths(root: &Path, commands: &[Vec<String>]) -> Result<Vec<PathBuf>, String> {
+  let mut created = Vec::new();
+  for args in commands.iter().filter(|args| args.first().is_some_and(|arg| arg == "reset")) {
+    let Some(separator) = args.iter().position(|arg| arg == "--") else { continue };
+    for argument in &args[separator + 1..] {
+      let path = Path::new(argument);
+      let path = if path.is_absolute() { path.to_path_buf() } else { root.join(path) };
+      if path.exists() || !path.parent().is_some_and(Path::is_dir) {
+        continue;
+      }
+      match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        Ok(_) => created.push(path),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => {
+          for created_path in &created {
+            let _ = fs::remove_file(created_path);
+          }
+          return Err(format!("Cannot prepare reset path {}: {error}", path.display()));
+        }
+      }
+    }
+  }
+  Ok(created)
+}
+
+pub fn cleanup_reset_paths(paths: &[PathBuf]) {
+  for path in paths {
+    let _ = fs::remove_file(path);
+  }
+}
 
 use serde_json::Value;
 use std::{
@@ -660,7 +695,7 @@ mod tests {
     fs::create_dir_all(&root).unwrap();
     let cli = find_cli();
     let invoke = |args: &[&str], json| run_as(&cli, &root, &args.iter().map(|s| s.to_string()).collect::<Vec<_>>(), json, None).unwrap();
-    invoke(&["repository", "create", "lorelens-test"], false);
+    invoke(&["repository", "create", "--offline", "lorelens-test"], false);
     fs::write(root.join("한글 sample.txt"), "first line\n").unwrap();
     let status = parse_status(&invoke(&["status", "--scan"], true)).unwrap();
     assert_eq!(status.changes[0].path, "한글 sample.txt");

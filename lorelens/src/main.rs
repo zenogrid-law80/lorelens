@@ -842,19 +842,33 @@ impl Lens {
                 .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-          if obliterate_paths.is_empty() {
-            return menu;
+          if !obliterate_paths.is_empty() {
+            let obliterate_view = view.clone();
+            let obliterate_root = context_root.clone();
+            menu = menu.item(PopupMenuItem::new(t("Obliterate…")).disabled(!enabled).on_click(move |_, window, cx| {
+              let _ = obliterate_view.update(cx, |this, cx| {
+                if this.root == obliterate_root {
+                  this.obliterate_files_dialog(obliterate_paths.clone(), window, cx);
+                }
+              });
+            }));
           }
-          let obliterate_view = view.clone();
-          let obliterate_root = context_root.clone();
-          menu = menu.item(PopupMenuItem::new(t("Obliterate…")).disabled(!enabled).on_click(move |_, window, cx| {
-            let _ = obliterate_view.update(cx, |this, cx| {
-              if this.root == obliterate_root {
-                this.obliterate_files_dialog(obliterate_paths.clone(), window, cx);
-              }
-            });
-          }));
-          menu
+          let reset_view = view.clone();
+          let reset_root = context_root.clone();
+          let mut reset_paths = paths;
+          reset_paths.sort();
+          reset_paths.dedup();
+          menu.separator().item(
+            PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Reset…", "reset"))
+              .disabled(!enabled)
+              .on_click(move |_, window, cx| {
+                let _ = reset_view.update(cx, |this, cx| {
+                  if this.root == reset_root {
+                    this.reset_dialog(reset_paths.clone(), window, cx);
+                  }
+                });
+              }),
+          )
         }),
     )
   }

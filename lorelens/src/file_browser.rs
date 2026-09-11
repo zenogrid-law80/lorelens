@@ -324,7 +324,7 @@ impl Lens {
                   .cloned()
                   .collect();
                 let mut menu = menu;
-                for (action, label) in [("stage", "Stage selected"), ("unstage", "Unstage selected"), ("reset", "Revert selected files")] {
+                for (action, label) in [("stage", "Stage selected"), ("unstage", "Unstage selected"), ("reset", "Reset selected files")] {
                   let paths: Vec<_> = changes
                     .iter()
                     .filter(|c| match action {
@@ -341,7 +341,7 @@ impl Lens {
                   let shortcut = match action {
                     "stage" => "stage",
                     "unstage" => "unstage",
-                    _ => "revert",
+                    _ => "reset",
                   };
                   menu = menu.item(
                     PopupMenuItem::new(shortcuts::shortcut_label(&shortcuts, label, shortcut))
@@ -519,7 +519,7 @@ impl Lens {
                 });
                 menu
                   .item(
-                    PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Revert folder", "revert"))
+                    PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Reset folder", "reset"))
                       .disabled(!enabled)
                       .on_click(move |_, window, cx| {
                         let _ = folder_view.update(cx, |this, cx| {
@@ -635,12 +635,12 @@ impl Lens {
                 let discard_path = context_relative.clone();
                 let discard_root = context_root.clone();
                 menu
-                  .item(PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Discard", "revert")).on_click(move |_, _, cx| {
+                  .item(PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Discard", "revert")).on_click(move |_, window, cx| {
                     let _ = discard_view.update(cx, |this, cx| {
                       if this.busy || this.root != discard_root || !this.status.changes.iter().any(|c| c.path == discard_path) || this.root.join(&discard_path).is_dir() {
                         return;
                       }
-                      this.command(vec!["reset".into(), "--purge".into(), "--".into(), discard_path.clone()], "Discard", false, true, cx);
+                      this.revert_dialog(vec![discard_path.clone()], false, window, cx);
                     });
                   }))
                   .separator()

@@ -2,6 +2,8 @@
 
 A local Lore VCS desktop client for Windows, built with Rust and GPUI. Its workspace, pending changes, submitted revisions, and details layout is inspired by P4V.
 
+![img.png](website/img.png)
+
 ## Running
 
 Requires stable Rust and the Visual Studio C++ Build Tools / Windows SDK.
@@ -94,11 +96,11 @@ cargo build
 
 The main modules are `src/main.rs` (application state), `src/view.rs` and related view modules (UI), `src/backend/` (CLI, filesystem, and ignore handling), `src/input.rs` (GPUI text input), and `src/settings.rs` (persistent settings). See the [GPUI documentation](https://gpui.rs/).
 
-## 파일 콘텐츠 영구 제거 (Obliterate)
+## Obliterate
 
-Files 또는 대기 중인 변경 목록에서 파일 우클릭 → **영구 제거(Obliterate)…**를 선택합니다. 저장소와 파일 경로, 영향을 확인한 뒤 확인 문구 `OBLITERATE`를 입력해야 실행됩니다. 폴더, 저장소 메타데이터, 심볼릭 링크/정션은 대상으로 허용하지 않습니다. 로컬에서 이미 삭제된 파일도 대기 중인 변경 목록에서 선택할 수 있으며, 실제 대상은 Lore가 현재/스테이징 상태에서 확인합니다.
+Right-click a file in the **Files** view or a pending changelist and select **Obliterate…**. After reviewing the repository, file path, and impact, you must enter the confirmation text `OBLITERATE` to execute the operation. Folders, repository metadata, and symbolic links or junctions cannot be selected as targets. Files that have already been deleted locally can still be selected from a pending changelist; Lore determines the actual target based on the current or staged state.
 
-`lore file obliterate --path=<파일>`로 해당 파일의 저장된 콘텐츠를 영구 제거하고 로컬 파일 삭제를 스테이징합니다. 원격 저장소 및 같은 콘텐츠를 참조하는 리비전에 영향을 줄 수 있으며 되돌릴 수 없습니다. 파일의 모든 과거 버전을 일괄 제거하는 기능은 아닙니다. 커밋과 Push는 자동 실행하지 않습니다. 권한·CLI 오류는 Details / Command log에서 확인할 수 있으며, 부분 실패 가능성을 고려해 실패 후에도 상태를 새로고침합니다.
+`lore file obliterate --path=<file>` permanently removes the stored content of the specified file and stages the deletion of the local file. This action is irreversible and may affect remote repositories as well as revisions referencing the same content; it does not remove all past versions of the file in a single batch. Commits and pushes are not performed automatically. Permission or CLI errors can be viewed in the Details/Command log, and the status is refreshed after a failure to account for the possibility of partial failure.
 
 ## External diff and merge tools
 
