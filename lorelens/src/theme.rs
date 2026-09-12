@@ -3,7 +3,7 @@ use gpui_component::{Theme, ThemeMode, ThemeRegistry};
 
 pub(crate) const LIGHT_THEME: &str = "LoreLens Light";
 pub(crate) const DARK_THEME: &str = "LoreLens Dark";
-pub(crate) const DEFAULT_THEME: &str = LIGHT_THEME;
+pub(crate) const DEFAULT_THEME: &str = "System";
 
 #[derive(Clone, Copy)]
 #[allow(clippy::upper_case_acronyms)]
@@ -109,6 +109,6 @@ mod tests {
     }
     assert!(names.contains(super::LIGHT_THEME), "the light default theme must be bundled");
     assert!(names.contains(super::DARK_THEME), "the dark default theme must be bundled");
-    assert!(names.contains(super::DEFAULT_THEME), "the default theme must be bundled");
+    assert_eq!(super::DEFAULT_THEME, "System", "the default must follow the system appearance");
   }
 }

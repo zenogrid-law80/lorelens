@@ -20,6 +20,7 @@ mod input;
 mod menus;
 mod settings;
 mod shortcuts;
+mod sparse_editor;
 mod view;
 use i18n::{t, tf};
 

@@ -2,6 +2,85 @@ use super::*;
 use gpui_component::scroll::ScrollableElement as _;
 
 impl Lens {
+  pub(super) fn sparse_workspace_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if self.busy {
+      return;
+    }
+    let root = self.root.clone();
+    let original = match backend::sparse::load(&root) {
+      Ok(view) => std::rc::Rc::new(view),
+      Err(error) => {
+        self.error = true;
+        self.notice = error;
+        cx.notify();
+        return;
+      }
+    };
+    let branch = self.status.branch.clone();
+    let editor = cx.new(|cx| sparse_editor::SparseEditor::new(root.clone(), self.cli.clone(), self.settings.identity.clone(), original.contents.clone().unwrap_or_default(), cx));
+    let failure = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+    let view = cx.entity().downgrade();
+    window.open_dialog(cx, move |dialog, _, cx| {
+      let editor = editor.clone();
+      let original = original.clone();
+      let root = root.clone();
+      let branch = branch.clone();
+      let view = view.clone();
+      let close_view = view.clone();
+      let close_root = root.clone();
+      let failure = failure.clone();
+      let error_text = failure.borrow().clone();
+      dialog
+        .title(t("Sparse workspace"))
+        .w(px(720.))
+        .close_button(false)
+        .overlay_closable(false)
+        .footer(dialog_footer("sparse-save", t("Save"), true))
+        .child(div().text_sm().child(root.display().to_string()))
+        .child(editor.clone())
+        .child(t(
+          "Save updates only the local view file. Later Lore operations may download or remove files to match these rules. Review pending changes before syncing.",
+        ))
+        .child(div().text_sm().text_color(palette(cx)(Danger)).child(error_text))
+        .on_close(move |_, _, cx| {
+          let _ = close_view.update(cx, |this, cx| {
+            if this.root == close_root {
+              this.refresh(cx);
+            }
+          });
+        })
+        .on_ok(move |_, window, cx| {
+          let changes = match editor.read(cx).selections() {
+            Ok(changes) => changes,
+            Err(error) => {
+              *failure.borrow_mut() = error;
+              window.refresh();
+              return false;
+            }
+          };
+          let result = view.update(cx, |this, cx| {
+            if this.busy || this.root != root || this.status.branch != branch {
+              return Err(t("The workspace changed or is busy. Reopen the sparse editor."));
+            }
+            backend::sparse::merge_selections(&root, &original, &changes)?;
+            this.error = false;
+            this.notice = t("Sparse workspace rules saved.");
+            cx.notify();
+            Ok(())
+          });
+          match result {
+            Ok(Ok(())) => true,
+            Ok(Err(error)) => {
+              *failure.borrow_mut() = error;
+              window.refresh();
+              false
+            }
+            Err(_) => false,
+          }
+        })
+    });
+  }
+
   pub(super) fn resolve_or_diff(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
     if self.busy || !self.connected {
       return;
@@ -64,8 +143,10 @@ impl Lens {
 
   pub(super) fn theme_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let themes = gpui_component::ThemeRegistry::global(cx).sorted_themes();
-    let light = themes.iter().filter(|theme| !theme.mode.is_dark()).map(|theme| theme.name.to_string()).collect::<Vec<_>>();
-    let dark = themes.iter().filter(|theme| theme.mode.is_dark()).map(|theme| theme.name.to_string()).collect::<Vec<_>>();
+    let mut light = themes.iter().filter(|theme| !theme.mode.is_dark()).map(|theme| theme.name.to_string()).collect::<Vec<_>>();
+    let mut dark = themes.iter().filter(|theme| theme.mode.is_dark()).map(|theme| theme.name.to_string()).collect::<Vec<_>>();
+    light.sort_by_key(|name| name != theme::LIGHT_THEME);
+    dark.sort_by_key(|name| name != theme::DARK_THEME);
     let show_dark = std::rc::Rc::new(std::cell::Cell::new(
       themes
         .iter()
@@ -76,8 +157,9 @@ impl Lens {
     // The dialog is rendered while Lens is borrowed; keep its selection locally.
     let selection = std::rc::Rc::new(std::cell::RefCell::new(self.settings.theme.clone()));
     let view = cx.entity().downgrade();
-    window.open_dialog(cx, move |dialog, _, _| {
+    window.open_dialog(cx, move |dialog, _, cx| {
       let current = selection.borrow().clone();
+      let active_theme = gpui_component::Theme::global(cx).theme_name().to_string();
       let system_selection = selection.clone();
       let system_view = view.clone();
       let dark_selected = show_dark.get();
@@ -86,7 +168,12 @@ impl Lens {
         let theme_view = view.clone();
         let theme_selection = selection.clone();
         let theme = name.clone();
-        let label = if current == theme { format!("✓ {theme}") } else { theme.clone() };
+        let label = if theme == theme::LIGHT_THEME || theme == theme::DARK_THEME {
+          tf("{theme} (Default)", &[("theme", theme.clone())])
+        } else {
+          theme.clone()
+        };
+        let label = if current == theme { format!("✓ {label}") } else { label };
         theme_list = theme_list.child(Button::new(("theme-option", index)).label(label).w_full().on_click(move |_, window, cx| {
           let selected_theme = theme.clone();
           *theme_selection.borrow_mut() = selected_theme.clone();
@@ -100,25 +187,32 @@ impl Lens {
       }
       let light_mode = show_dark.clone();
       let dark_mode = show_dark.clone();
-      let system_label = t("System theme");
+      let default_label = t("Default theme: LoreLens Light / Dark");
       dialog
         .title(t("Choose theme"))
         .w(px(520.))
         .footer(dialog_footer("theme-close", t("Close"), false))
         .child(
           Button::new("system-theme")
-            .label(if current == "System" { format!("✓ {system_label}") } else { system_label })
+            .label(if current == theme::DEFAULT_THEME { format!("✓ {default_label}") } else { default_label })
             .w_full()
             .on_click(move |_, window, cx| {
-              *system_selection.borrow_mut() = "System".into();
+              *system_selection.borrow_mut() = theme::DEFAULT_THEME.into();
               let _ = system_view.update(cx, |this, cx| {
-                this.settings.theme = "System".into();
+                this.settings.theme = theme::DEFAULT_THEME.into();
                 this.save_settings();
                 cx.notify();
               });
-              defer_theme("System", window, cx);
+              defer_theme(theme::DEFAULT_THEME, window, cx);
             }),
         )
+        .child(
+          div()
+            .text_sm()
+            .text_color(palette(cx)(MUTED))
+            .child(t("Automatically switches between light and dark to match your system settings.")),
+        )
+        .child(div().text_sm().child(tf("Current theme: {theme}", &[("theme", active_theme)])))
         .child(
           div()
             .flex()

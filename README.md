@@ -113,10 +113,18 @@ Diff compares the current revision with a copy of the local file. Temporary comp
 - **Repository**: open, clone, and revisit repositories.
 - **Changes**: Stage, Unstage, Commit staged, File history, and Pending push.
 - **Tools**: select a Diff / Merge tool, locate an executable, use `PATH`, and locate the Lore CLI.
-- **View**: choose a theme and open the command log. New installations use **LoreLens Light**, with white panels and gold accents. Select it under **View → Theme… → Light**; **LoreLens Dark** is also available. Existing theme preferences are preserved, and the system theme switches between the two LoreLens themes to match the OS appearance.
+- **View**: choose a theme and open the command log. New installations use **LoreLens Light** or **LoreLens Dark** to match the OS appearance. Both are available under **View → Theme…**, and existing theme preferences are preserved.
 - **Account**: log in and display the current account.
 
 The second row contains the repository selector, branch menu, Refresh, Sync, and Push. The file context menu contains Diff, Stage/Unstage, Discard, Move, Explorer/Finder navigation, terminal access, and Lock/Unlock actions.
+
+## Sparse workspace
+
+Open **Repository → Sparse workspace…** to select folders from the repository tree, including folders absent from the local disk. A usable Lore CLI is required. Expanding a folder queries its immediate children; subsequent queries use the initial listing's revision to keep the tree consistent.
+
+Check a folder to include its entire subtree, or uncheck it to exclude it. Child selections can override a parent selection. **All repository folders** includes or excludes the entire view, including root-level files. **Undo selections** restores the selection state from when the dialog opened. Existing comments and rules are preserved, with folder overrides appended on save. Arbitrary wildcard or file-level rules are conservatively shown as **partial / custom rules**, not as a claim that every descendant has the same state. Selecting that folder explicitly overrides those rules within its subtree.
+
+**Save** rereads `.lore/view` (or legacy `.urc/view`) and merges this session's folder selections into its latest contents, preserving external edits and comments. This session's explicit selections take precedence within the selected folders. Repeated LoreLens-generated selection blocks are compacted to their effective settings, including when no new selections were made. Superseded folder choices and choices already covered by a parent are removed. Authored rules and comments remain ordering barriers so cleanup does not change their precedence. A further change detected during saving is rejected; file replacement is atomic. Closing the editor refreshes repository status. Saving does not run sync or delete workspace files; subsequent Lore operations may materialize or remove files according to the view, so review pending changes before syncing. Listing errors can be retried without losing selections.
 
 ## Localization
 

@@ -235,6 +235,7 @@ impl Lens {
     let auto_refresh = self.settings.auto_refresh;
     let line_ending = self.settings.text_line_ending.clone();
     let encoding = self.settings.text_encoding.clone();
+    let extension_count = self.settings.text_extensions.len();
     let ready = !self.busy;
     Button::new("options-menu").ghost().label(format!("{} ▾", t("Options"))).dropdown_menu(move |menu, window, cx| {
       let refresh_view = view.clone();
@@ -274,26 +275,26 @@ impl Lens {
       let menu = menu.item(PopupMenuItem::new(t("Locate Lore CLI…")).on_click(move |_, _, cx| {
         let _ = cli_view.update(cx, |this, cx| this.choose(true, cx));
       }));
-      let line_ending_view = view.clone();
-      let current_line_ending = line_ending.clone();
-      let menu = menu
-        .separator()
-        .submenu(tf("Line endings: {selected}", &[("selected", line_ending.clone())]), window, cx, move |mut menu, _, _| {
-          for value in ["System", "LF", "CR", "CRLF"] {
-            let view = line_ending_view.clone();
-            menu = menu.item(PopupMenuItem::new(t(value)).checked(value == current_line_ending).on_click(move |_, _, cx| {
-              let _ = view.update(cx, |this, cx| {
-                this.settings.text_line_ending = value.into();
-                this.save_settings();
-                cx.notify();
-              });
-            }));
-          }
-          menu
-        });
-      let encoding_view = view.clone();
-      let current_encoding = encoding.clone();
-      let menu = menu.submenu(tf("Encoding: {selected}", &[("selected", encoding.clone())]), window, cx, move |mut menu, _, _| {
+      let text_files_view = view.clone();
+      let text_files_line_ending = line_ending.clone();
+      let text_files_encoding = encoding.clone();
+      let menu = menu.separator().submenu(t("Text file settings"), window, cx, move |mut menu, _, _| {
+        let line_ending_view = text_files_view.clone();
+        let current_line_ending = text_files_line_ending.clone();
+        menu = menu.label(t("Line endings"));
+        for value in ["System", "LF", "CR", "CRLF"] {
+          let view = line_ending_view.clone();
+          menu = menu.item(PopupMenuItem::new(t(value)).checked(value == current_line_ending).on_click(move |_, _, cx| {
+            let _ = view.update(cx, |this, cx| {
+              this.settings.text_line_ending = value.into();
+              this.save_settings();
+              cx.notify();
+            });
+          }));
+        }
+        let encoding_view = text_files_view.clone();
+        let current_encoding = text_files_encoding.clone();
+        menu = menu.separator().label(t("Encoding"));
         for value in ["System", "UTF-8", "UTF-8 no BOM"] {
           let view = encoding_view.clone();
           menu = menu.item(PopupMenuItem::new(t(value)).checked(value == current_encoding).on_click(move |_, _, cx| {
@@ -304,12 +305,14 @@ impl Lens {
             });
           }));
         }
+        let extensions_view = text_files_view.clone();
         menu
+          .separator()
+          .label(tf("Text file extensions ({count})", &[("count", extension_count.to_string())]))
+          .item(PopupMenuItem::new(t("Manage text file extensions…")).on_click(move |_, window, cx| {
+            let _ = extensions_view.update(cx, |this, cx| this.text_extensions_dialog(window, cx));
+          }))
       });
-      let extensions_view = view.clone();
-      let menu = menu.item(PopupMenuItem::new(t("Manage text file extensions…")).on_click(move |_, window, cx| {
-        let _ = extensions_view.update(cx, |this, cx| this.text_extensions_dialog(window, cx));
-      }));
       let obliterate_view = view.clone();
       let view = view.clone();
       let menu = menu

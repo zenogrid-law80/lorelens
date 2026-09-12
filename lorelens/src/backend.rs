@@ -6,6 +6,7 @@ mod history;
 mod ignore;
 mod obliterate;
 mod reset;
+pub mod sparse;
 pub use binary_merge::{BinarySide, is_binary_merge, select_binary_merge};
 pub fn list_tree(root: &Path, expanded: &std::collections::HashSet<PathBuf>) -> Result<Vec<Entry>, String> {
   fn walk(root: &Path, dir: &Path, expanded: &std::collections::HashSet<PathBuf>, result: &mut Vec<Entry>) -> Result<(), String> {

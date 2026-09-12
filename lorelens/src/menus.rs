@@ -73,7 +73,12 @@ impl Lens {
       .when(!toolbar && kind != "Account", |button| button.ghost());
     button.dropdown_menu(move |mut menu, window, cx| {
       let items: Vec<(&str, &str, bool)> = match kind {
-        "Repository" => vec![("Open repository…", "open", ready), ("Clone repository…", "clone", ready), ("Create repository…", "create", ready)],
+        "Repository" => vec![
+          ("Open repository…", "open", ready),
+          ("Clone repository…", "clone", ready),
+          ("Create repository…", "create", ready),
+          ("Sparse workspace…", "sparse", ready),
+        ],
         "Changes" => vec![
           ("Stage", "stage", file),
           ("Unstage", "unstage", file),
@@ -97,6 +102,7 @@ impl Lens {
                   "open" => this.choose(false, cx),
                   "clone" => this.clone_dialog(window, cx),
                   "create" => this.create_repository_dialog(window, cx),
+                  "sparse" => this.sparse_workspace_dialog(window, cx),
                   "stage" | "unstage" | "history" => this.file_command(action, window, cx),
                   "commit" => this.commit_staged(cx),
                   "login" => this.login_dialog(window, cx),
@@ -190,14 +196,17 @@ impl Lens {
           })
           .unwrap_or_default();
         menu = menu.separator().label(t("Recent repositories"));
-        for path in &recent {
+        for (index, path) in recent.iter().enumerate() {
           let view = view.clone();
           let path = path.clone();
-          let label = match backend::repository_remote_url(&path) {
-            Some(url) => format!("{} — {url}", path.display()),
-            None => path.display().to_string(),
-          };
-          menu = menu.item(PopupMenuItem::new(label).disabled(!ready).on_click(move |_, _, cx| {
+          let label = path.display().to_string();
+          let remote_url = backend::repository_remote_url(&path);
+          let item = PopupMenuItem::element(move |_, _| {
+            div().id(("recent-repository", index)).w_full().child(label.clone()).when_some(remote_url.clone(), |row, url| {
+              row.tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(url.clone()).build(window, cx))
+            })
+          });
+          menu = menu.item(item.disabled(!ready).on_click(move |_, _, cx| {
             let _ = view.update(cx, |this, cx| {
               if this.busy {
                 return;
