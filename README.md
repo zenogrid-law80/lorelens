@@ -50,7 +50,7 @@ Use **Repository → Create repository…** to create a remote Lore repository a
 
 The create dialog remembers the last URL and destination, including when canceled. Each field offers its ten most recent non-empty values without duplicates, saved across app restarts separately from clone history.
 
-The **Account** button displays the account used by the current workspace (`lore auth info`). Authentication tokens are never displayed. **Sync** runs `lore sync` and refreshes the file list, change status, lock indicators, and branch information. `--reset` and `--force` are not used.
+The **Account** button displays the account used by the current workspace (`lore auth info`). After login, LoreLens selects the identity matching the login server, updates the repository identity, and only then refreshes repository status. Authentication tokens are never displayed. **Sync** runs `lore sync` and refreshes the file list, change status, lock indicators, and branch information. `--reset` and `--force` are not used.
 
 Use `Ctrl` (or `Cmd` on macOS) plus click to add or remove files and folders from the selection. Use `Shift` plus click to select a range. Stage, Unstage, and Diff apply to the selected items; context-menu actions apply to the item that was right-clicked.
 

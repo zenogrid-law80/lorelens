@@ -24,7 +24,7 @@ pub fn list_tree(root: &Path, expanded: &std::collections::HashSet<PathBuf>) -> 
   walk(root, root, expanded, &mut result)?;
   Ok(result)
 }
-pub use cli::{find_cli, run_as, run_branch_switch_skipping_unavailable};
+pub use cli::{find_cli, run_as, run_branch_switch_skipping_unavailable, run_global};
 pub use deduplicate::{deduplicate_commands, deduplicate_files, duplicate_change_paths, duplicate_local_files};
 pub use history::{FileRevision, file_history};
 pub use obliterate::obliterate_args;
@@ -514,7 +514,8 @@ pub fn has_valid_login(output: &str, identity: Option<&str>, now_ms: u64) -> Res
     match event["tagName"].as_str() {
       Some("authIdentity") => {
         let data = &event["data"];
-        valid |= data["userId"].as_str().is_some_and(|id| !id.is_empty() && identity.is_none_or(|selected| selected == id)) && data["expires"].as_u64().is_some_and(|expires| expires > now_ms);
+        valid |= data["userId"].as_str().is_some_and(|id| !id.is_empty() && identity.is_none_or(|selected| selected == id))
+          && data["expires"].as_u64().is_some_and(|expires| expires == 0 || expires > now_ms);
       }
       Some("complete") => {
         if event["data"]["status"].as_i64() != Some(0) {
@@ -529,6 +530,57 @@ pub fn has_valid_login(output: &str, identity: Option<&str>, now_ms: u64) -> Res
     return Err("Login state check did not complete".into());
   }
   Ok(valid)
+}
+
+pub fn login_identity(output: &str, remote: &str) -> Result<String, String> {
+  let remote_host = endpoint_host(remote).ok_or_else(|| "Login server URL has no valid host".to_string())?;
+  let mut identities = std::collections::BTreeSet::new();
+  let mut complete = false;
+  for line in output.lines().filter(|line| !line.trim().is_empty()) {
+    let event: Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
+    match event["tagName"].as_str() {
+      Some("authIdentity") => {
+        let data = &event["data"];
+        let Some(id) = data["userId"].as_str().filter(|id| !id.is_empty()) else {
+          continue;
+        };
+        let auth_url_matches = data["authUrl"].as_str().and_then(endpoint_host).is_some_and(|host| host == remote_host);
+        let authorized_domain_matches = data["authorizedDomains"]
+          .as_str()
+          .is_some_and(|domains| domains.split(',').filter_map(endpoint_host).any(|host| host == remote_host));
+        if auth_url_matches || authorized_domain_matches {
+          identities.insert(id.to_owned());
+        }
+      }
+      Some("complete") => {
+        if event["data"]["status"].as_i64() != Some(0) {
+          return Err("Login identity lookup failed".into());
+        }
+        complete = true;
+      }
+      _ => {}
+    }
+  }
+  if !complete {
+    return Err("Login identity lookup did not complete".into());
+  }
+  match identities.len() {
+    1 => Ok(identities.pop_first().unwrap()),
+    0 => Err(format!("No authenticated account matches {remote_host}")),
+    _ => Err(format!("Multiple authenticated accounts match {remote_host}; clear old Lore CLI accounts and sign in again")),
+  }
+}
+
+fn endpoint_host(value: &str) -> Option<String> {
+  let value = value.trim();
+  let authority = value.split_once("://").map_or(value, |(_, rest)| rest).split('/').next()?.rsplit('@').next()?;
+  let host = if let Some(rest) = authority.strip_prefix('[') {
+    rest.split_once(']')?.0
+  } else {
+    authority.split(':').next()?
+  };
+  let host = host.trim().trim_end_matches('.');
+  (!host.is_empty()).then(|| host.to_ascii_lowercase())
 }
 
 pub fn update_repository_identity(root: &Path, identity: &str) -> Result<(), String> {
@@ -595,6 +647,41 @@ mod tests {
     assert!(!has_valid_login(r#"{"tagName":"complete","data":{"status":0}}"#, None, 0).unwrap());
     assert!(has_valid_login("", None, 0).is_err());
     assert!(has_valid_login(r#"{"tagName":"complete","data":{"status":45}}"#, None, 0).is_err());
+    assert!(
+      has_valid_login(
+        "{\"tagName\":\"authIdentity\",\"data\":{\"userId\":\"alice\",\"expires\":0}}\n{\"tagName\":\"complete\",\"data\":{\"status\":0}}",
+        Some("alice"),
+        u64::MAX
+      )
+      .unwrap()
+    );
+  }
+
+  #[test]
+  fn selects_the_authenticated_identity_for_the_login_server() {
+    let output = concat!(
+      r#"{"tagName":"authIdentity","data":{"authUrl":"https://old.example.com:8444","userId":"old","authorizedDomains":"old.example.com"}}"#,
+      "\n",
+      r#"{"tagName":"authIdentity","data":{"authUrl":"https://auth.example.com","resource":"","userId":"new","authorizedDomains":"https://lorehub.example.com:8443, example.com"}}"#,
+      "\n",
+      r#"{"tagName":"authIdentity","data":{"authUrl":"https://auth.example.com","resource":"repository","userId":"new","authorizedDomains":"lorehub.example.com"}}"#,
+      "\n",
+      r#"{"tagName":"complete","data":{"status":0}}"#
+    );
+    assert_eq!(login_identity(output, "lores://LoreHub.Example.com:41337/repository").unwrap(), "new");
+    assert!(login_identity(output, "lores://missing.example.com:41337").unwrap_err().contains("No authenticated account"));
+  }
+
+  #[test]
+  fn rejects_ambiguous_login_identities() {
+    let output = concat!(
+      r#"{"tagName":"authIdentity","data":{"authUrl":"https://auth.example.com","userId":"first","authorizedDomains":"server.example.com"}}"#,
+      "\n",
+      r#"{"tagName":"authIdentity","data":{"authUrl":"https://auth.example.com","userId":"second","authorizedDomains":"server.example.com"}}"#,
+      "\n",
+      r#"{"tagName":"complete","data":{"status":0}}"#
+    );
+    assert!(login_identity(output, "lores://server.example.com").unwrap_err().contains("Multiple authenticated accounts"));
   }
 
   #[test]

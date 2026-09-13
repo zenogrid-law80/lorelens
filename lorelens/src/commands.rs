@@ -188,6 +188,7 @@ impl Lens {
     let authentication = kind.is_authentication();
     let login = kind == CommandKind::Login;
     let login_remote = if login { args.get(1).cloned() } else { None };
+    let login_remote_for_lookup = login_remote.clone();
     let branches = kind == CommandKind::ListBranches;
     let task = cx.background_executor().spawn(async move {
       let (reset_placeholders, prepare_error) = if resets_files {
@@ -230,6 +231,21 @@ impl Lens {
         },
         Err,
       );
+      let result = if login {
+        result.and_then(|login_output| {
+          (|| {
+            let remote = login_remote_for_lookup.as_deref().ok_or("Login server URL is missing")?;
+            let identities = backend::run_global(&cli, &root, &["auth".into(), "list".into()], true, None)?;
+            let id = backend::login_identity(&identities, remote)?;
+            let account = backend::run_global(&cli, &root, &["auth".into(), "info".into(), id.clone()], true, Some(&id))?;
+            backend::parse_account(&account)?;
+            Ok(format!("{}\n{}", login_output.trim_end(), account.trim_start()))
+          })()
+          .map_err(|error: String| format!("[login-connection] {error}"))
+        })
+      } else {
+        result
+      };
       if result.is_err() {
         backend::cleanup_reset_paths(&reset_placeholders);
       }
@@ -364,10 +380,24 @@ impl Lens {
               this.save_settings();
             } else if kind == CommandKind::Login {
               this.settings.login_remote = login_remote;
+              if let Ok((id, name)) = backend::parse_account(&output) {
+                this.settings.identity = Some(id);
+                this.logged_in_account = name;
+              }
               this.save_settings();
-              this.notice = "Login completed. Open or clone a repository.".into();
+              this.notice = if backend::is_repository(&this.root) {
+                "Login completed. Repository authentication connected.".into()
+              } else {
+                "Login completed. Open or clone a repository.".into()
+              };
               this.output = t(&this.notice);
               this.output_title = "Login".into();
+              if let Some(Err(error)) = &identity_update {
+                this.error = true;
+                this.notice = "Login completed; repository identity update failed".into();
+                this.output = format!("{}\n\n{error}", t(&this.notice));
+                this.log(error.clone());
+              }
             } else if kind.is_authentication() {
               match backend::parse_account(&output) {
                 Ok((id, name)) => {
@@ -401,7 +431,7 @@ impl Lens {
             if !silent_refresh {
               this.log(this.notice.clone());
             }
-            if kind == CommandKind::Login && backend::is_repository(&this.root) {
+            if kind == CommandKind::Login && backend::is_repository(&this.root) && identity_update.as_ref().is_some_and(Result::is_ok) {
               this.refresh(cx);
             }
             if status && this.connected {
@@ -426,7 +456,8 @@ impl Lens {
           }
           Err(e) => {
             let validation = e.strip_prefix("[stage-validation] ").map(str::to_owned);
-            let e = validation.clone().unwrap_or(e);
+            let login_connection = e.strip_prefix("[login-connection] ").map(str::to_owned);
+            let e = validation.clone().or_else(|| login_connection.clone()).unwrap_or(e);
             if status {
               this.connected = false;
               this.status = Status::default();
@@ -435,10 +466,28 @@ impl Lens {
               this.logged_in_account = "Account unavailable".into();
             }
             this.error = true;
-            this.notice = validation.unwrap_or_else(|| "Command failed · see details".into());
+            this.notice = validation.unwrap_or_else(|| {
+              if login_connection.is_some() {
+                "Login completed, but account connection failed · see details".into()
+              } else if e.contains("Not authenticated") {
+                "Repository authentication required · see details".into()
+              } else {
+                "Command failed · see details".into()
+              }
+            });
             this.output_title = tf("{title} failed", &[("title", t(&title))]);
-            this.output = if e.contains("Invalid or expired authentication") {
+            this.output = if login_connection.is_some() {
+              format!(
+                "{e}\n\n{}",
+                t("Sign-in succeeded, but LoreLens could not select and connect the account. Sign in to the repository server again.")
+              )
+            } else if e.contains("Invalid or expired authentication") {
               format!("{e}\n\nAuthentication expired. Run `lore login` for this repository, then refresh.")
+            } else if e.contains("Not authenticated") {
+              format!(
+                "{e}\n\n{}",
+                t("LoreLens could not connect the signed-in account to this repository. Sign in to the repository server again, then refresh.")
+              )
             } else {
               e.clone()
             };

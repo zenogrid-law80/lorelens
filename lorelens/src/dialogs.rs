@@ -1,6 +1,17 @@
 use super::*;
 use gpui_component::scroll::ScrollableElement as _;
 
+fn valid_lore_remote(value: &str, repository_required: bool) -> bool {
+  if value.chars().any(char::is_whitespace) {
+    return false;
+  }
+  let Some(rest) = value.strip_prefix("lores://") else {
+    return false;
+  };
+  let (host, repository) = rest.split_once('/').unwrap_or((rest, ""));
+  !host.is_empty() && (!repository_required || !repository.trim_matches('/').is_empty())
+}
+
 impl Lens {
   pub(super) fn sparse_workspace_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     if self.busy {
@@ -813,8 +824,8 @@ impl Lens {
         .on_ok(move |_, window, cx| {
           let remote = url_input.read(cx).content.trim().to_owned();
           let path = PathBuf::from(destination_input.read(cx).content.trim());
-          let error = if !remote.contains("://") || remote.ends_with("://") || remote.chars().any(char::is_whitespace) {
-            Some("Enter a repository URL including its scheme and repository name.")
+          let error = if !valid_lore_remote(&remote, true) {
+            Some("Enter a lores:// repository URL including the repository name.")
           } else if !path.is_absolute() {
             Some("Enter an absolute destination path.")
           } else {
@@ -1129,8 +1140,8 @@ impl Lens {
         )
         .on_ok(move |_, window, cx| {
           let remote = input.read(cx).content.trim().to_owned();
-          if !remote.contains("://") || remote.ends_with("://") || remote.chars().any(char::is_whitespace) {
-            *validation.borrow_mut() = "Enter a server URL including its scheme.".into();
+          if !valid_lore_remote(&remote, false) {
+            *validation.borrow_mut() = "Enter a lores:// server URL.".into();
             window.refresh();
             return false;
           }
@@ -1546,12 +1557,9 @@ impl Lens {
         })
         .on_ok(move |_, window, cx| {
           let remote = url_input.read(cx).content.trim().to_owned();
-          let valid_url = remote
-            .split_once("://")
-            .is_some_and(|(_, rest)| rest.split_once('/').is_some_and(|(host, repository)| !host.is_empty() && !repository.trim_matches('/').is_empty()))
-            && !remote.chars().any(char::is_whitespace);
+          let valid_url = valid_lore_remote(&remote, true);
           if !valid_url {
-            *validation.borrow_mut() = t("Enter a server URL including the repository name.");
+            *validation.borrow_mut() = t("Enter a lores:// server URL including the repository name.");
             window.refresh();
             return false;
           }
@@ -1644,7 +1652,18 @@ fn folder_change_paths(changes: &[Change], targets: &[(String, bool)], action: &
 
 #[cfg(test)]
 mod folder_scope_tests {
-  use super::{Change, folder_change_paths};
+  use super::{Change, folder_change_paths, valid_lore_remote};
+
+  #[test]
+  fn lore_remote_validation_requires_the_secure_lore_scheme() {
+    assert!(valid_lore_remote("lores://server:41337", false));
+    assert!(valid_lore_remote("lores://server:41337/project", false));
+    assert!(valid_lore_remote("lores://server:41337/project", true));
+    assert!(!valid_lore_remote("lores://server:41337", true));
+    assert!(!valid_lore_remote("lore://server:41337/project", true));
+    assert!(!valid_lore_remote("https://server/project", true));
+    assert!(!valid_lore_remote("lores://server/project name", true));
+  }
 
   #[test]
   fn folder_scope_respects_depth_stage_state_and_path_boundaries() {
