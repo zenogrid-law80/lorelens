@@ -26,7 +26,9 @@ pub fn list_tree(root: &Path, expanded: &std::collections::HashSet<PathBuf>) -> 
 }
 pub use cli::{find_cli, run_as, run_branch_switch_skipping_unavailable, run_global};
 pub use deduplicate::{deduplicate_commands, deduplicate_files, duplicate_change_paths, duplicate_local_files};
-pub use history::{FileRevision, file_history};
+pub use history::{
+  FileRevision, RemoteCommit, RemoteHistory, RevisionComparison, RevisionFile, file_history, remote_branch_history, remote_history, revision_files, revision_patch, save_revision_patch,
+};
 pub use obliterate::obliterate_args;
 pub use reset::reset_commands;
 pub fn cleanup_resolved_merge(cli: &Path, root: &Path, relative: &str, identity: Option<&str>) -> Result<(), String> {
@@ -333,7 +335,7 @@ fn parse_revision_history(output: &str) -> Result<Vec<LocalCommit>, String> {
       Some("metadata") if event["data"]["key"] == "message" => {
         if let Some(commit) = revisions.last_mut() {
           let value = &event["data"]["value"];
-          commit.message = value.as_str().or_else(|| value["value"].as_str()).unwrap_or_default().to_string();
+          commit.message = value.as_str().or_else(|| value["data"].as_str()).or_else(|| value["value"].as_str()).unwrap_or_default().to_string();
         }
       }
       Some("complete") => {

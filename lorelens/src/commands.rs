@@ -68,6 +68,7 @@ struct CommandResult {
   identity_update: Option<Result<(), String>>,
   pending_push: Option<Result<Vec<backend::LocalCommit>, String>>,
   pending_pull: Option<Result<Vec<backend::LocalCommit>, String>>,
+  remote_history: Option<Result<backend::RemoteHistory, String>>,
 }
 
 #[cfg(test)]
@@ -183,6 +184,8 @@ impl Lens {
     let text_line_ending = self.settings.text_line_ending.clone();
     let text_encoding = self.settings.text_encoding.clone();
     let text_extensions = self.settings.text_extensions.clone();
+    let remote_history_limit = self.remote_history.limit;
+    let remote_history_branch = self.remote_history.branch.clone();
     let kind = CommandKind::from_args(&args);
     let resets_files = commands.iter().any(|args| args.first().is_some_and(|arg| arg == "reset"));
     let authentication = kind.is_authentication();
@@ -271,6 +274,12 @@ impl Lens {
           .map_err(|e| e.clone())
           .and_then(|output| backend::pending_pull(&cli, &root, output, identity.as_deref()))
       });
+      let remote_history = status.then(|| {
+        result.as_ref().map_err(|error| error.clone()).and_then(|output| match remote_history_branch.as_deref() {
+          Some(branch) => backend::remote_branch_history(&cli, &root, branch, remote_history_limit, identity.as_deref()),
+          None => backend::remote_history(&cli, &root, output, remote_history_limit, identity.as_deref()),
+        })
+      });
       let locks = status.then(|| {
         let state = backend::parse_status(result.as_ref().map_err(|e| e.clone())?)?;
         backend::run_as(&cli, &root, &["lock".into(), "query".into(), "--branch".into(), state.branch], true, identity.as_deref()).and_then(|output| backend::parse_locked_paths(&output))
@@ -282,6 +291,7 @@ impl Lens {
         identity_update,
         pending_push,
         pending_pull,
+        remote_history,
       }
     });
     cx.spawn(async move |this, cx| {
@@ -292,11 +302,15 @@ impl Lens {
         identity_update,
         pending_push,
         pending_pull,
+        remote_history,
       } = task.await;
       let _ = this.update(cx, |this, cx| {
         let silent_refresh = this.silent_refresh;
         this.busy = false;
         this.silent_refresh = false;
+        if let Some(remote_history) = remote_history {
+          this.set_remote_history(remote_history, cx);
+        }
         if let Some(pending_pull) = pending_pull {
           this.pending_pull = pending_pull;
         }

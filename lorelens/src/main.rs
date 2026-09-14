@@ -5,7 +5,7 @@ mod macos;
 mod state;
 use state::{PendingTreeRow, PreviewState, SelectionState};
 mod theme;
-use theme::{ColorRole::*, apply_theme, defer_theme, palette};
+use theme::{ColorRole::*, apply_theme, defer_theme, palette, selected_row_palette};
 mod backend;
 mod branches;
 #[cfg(windows)]
@@ -18,6 +18,7 @@ mod history;
 mod i18n;
 mod input;
 mod menus;
+mod remote_history;
 mod settings;
 mod shortcuts;
 mod sparse_editor;
@@ -107,6 +108,7 @@ enum Tab {
 enum DiffRetry {
   Working { root: PathBuf, path: String },
   History { root: PathBuf, path: String, older: String, newer: String },
+  RemoteHistory { root: PathBuf, comparison: backend::RevisionComparison },
 }
 
 struct Lens {
@@ -131,6 +133,7 @@ struct Lens {
   selection: SelectionState,
   preview: PreviewState,
   file_history: history::FileHistoryState,
+  remote_history: remote_history::RemoteHistoryState,
   output: String,
   output_title: String,
   logs: Vec<String>,
@@ -242,6 +245,7 @@ impl Lens {
                   match retry {
                     Some(DiffRetry::Working { root, path }) if this.root == root => this.external_diff(path, cx),
                     Some(DiffRetry::History { root, path, older, newer }) if this.root == root && this.file_history.matches_pair(&path, &older, &newer) => this.diff_selected_history(cx),
+                    Some(DiffRetry::RemoteHistory { root, comparison }) if this.root == root && this.remote_history.matches_comparison(&comparison) => this.diff_remote_file(cx),
                     _ => {}
                   }
                 }
@@ -370,6 +374,7 @@ impl Lens {
             collapsed_change_folders: Default::default(),
             selection: SelectionState::default(), preview: PreviewState::default(), output: "Open a folder to browse local files.\n\nFor version control, open a Lore repository and locate the Lore CLI.\nUse Sync to synchronize the current repository. Commits are not pushed automatically.".into(),
             file_history: history::FileHistoryState::default(),
+            remote_history: remote_history::RemoteHistoryState::new(cx),
             output_title: "Welcome to LoreLens".into(), logs: vec![],
             message: cx.new(|cx| TextInput::new("Describe your staged changes…", cx)),
             filter, pending_filter, selected_path, pending_visible: Vec::new(), pending_rows: Vec::new(), notice: "Opening repository…".into(), error: false, show_log, obliterate_enabled: false,
@@ -475,6 +480,7 @@ impl Lens {
     self.output.clear();
     self.preview = PreviewState::default();
     self.file_history = history::FileHistoryState::default();
+    self.remote_history = remote_history::RemoteHistoryState::new(cx);
     self.output_title = "Repository opened".into();
     self.connect_after_load = backend::is_repository(&self.root);
     if self.connect_after_load {
@@ -728,13 +734,17 @@ impl Lens {
     !paths.is_empty() && paths.iter().all(|path| eligible.contains(path.as_str()))
   }
 
-  fn pending_folder_row(&self, index: usize, path: String, name: String, depth: usize, change_index: Option<usize>, cx: &mut Context<Self>) -> Stateful<Div> {
+  fn pending_folder_row(&self, index: usize, row: PendingTreeRow, window_active: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+    let PendingTreeRow::Folder { path, name, depth, change_index } = row else {
+      unreachable!("pending_folder_row requires a folder row");
+    };
     let rgb = palette(cx);
     let filtering = !self.pending_filter.read(cx).content.is_empty();
     let expanded = !self.collapsed_change_folders.contains(&path) || filtering;
     let folder_change = change_index.and_then(|index| self.status.changes.get(index));
     let checkbox = folder_change.map(|change| (change_index.expect("folder change index"), change.path.clone()));
     let selected = folder_change.is_some_and(|change| self.selection.paths.contains(&change.path));
+    let (selected_background, selected_foreground) = selected_row_palette(cx, window_active);
     let action = folder_change.map(|change| change.action.as_str()).unwrap_or("");
     let state = folder_change.map_or("", |change| {
       if change.conflict {
@@ -758,8 +768,10 @@ impl Lens {
         .gap_2()
         .border_b_1()
         .border_color(rgb(Divider))
-        .bg(rgb(if selected { Selected } else { PANEL }))
-        .when(!filtering, |row| row.cursor_pointer().hover(|style| style.bg(rgb(Hover))))
+        .bg(if selected { selected_background } else { rgb(PANEL) })
+        .when(selected, |row| row.text_color(selected_foreground).font_weight(FontWeight::BOLD))
+        .when(!filtering && !selected, |row| row.cursor_pointer().hover(|style| style.bg(rgb(Hover))))
+        .when(!filtering && selected, |row| row.cursor_pointer())
         .child(div().w(px(16.)).flex_shrink_0().when_some(checkbox, |slot, (change_index, change_path)| {
           let selected = self.selection.paths.contains(&change_path);
           slot.child(
@@ -793,14 +805,14 @@ impl Lens {
           div()
             .w(px(16.))
             .flex_shrink_0()
-            .text_color(rgb(MUTED))
+            .text_color(if selected { selected_foreground } else { rgb(MUTED) })
             .child(Icon::new(if expanded { IconName::ChevronDown } else { IconName::ChevronRight }).size(px(14.))),
         )
         .child(
           div()
             .w(px(16.))
             .flex_shrink_0()
-            .text_color(rgb(Warning))
+            .text_color(if selected { selected_foreground } else { rgb(Warning) })
             .child(Icon::new(if expanded { IconName::FolderOpen } else { IconName::Folder }).size(px(16.))),
         )
         .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().child(name))
@@ -809,13 +821,17 @@ impl Lens {
             .w(px(90.))
             .flex_shrink_0()
             .text_size(px(11.))
-            .text_color(rgb(if matches!(action, "remove" | "delete") {
-              Danger
-            } else if matches!(action, "add" | "create") {
-              Success
+            .text_color(if selected {
+              selected_foreground
             } else {
-              MUTED
-            }))
+              rgb(if matches!(action, "remove" | "delete") {
+                Danger
+              } else if matches!(action, "add" | "create") {
+                Success
+              } else {
+                MUTED
+              })
+            })
             .child(t(action)),
         )
         .child(
@@ -823,13 +839,17 @@ impl Lens {
             .w(px(110.))
             .flex_shrink_0()
             .text_size(px(11.))
-            .text_color(rgb(if state == "Conflict" {
-              Danger
-            } else if state == "Staged" {
-              Success
+            .text_color(if selected {
+              selected_foreground
             } else {
-              MUTED
-            }))
+              rgb(if state == "Conflict" {
+                Danger
+              } else if state == "Staged" {
+                Success
+              } else {
+                MUTED
+              })
+            })
             .child(t(state)),
         )
         .on_click(cx.listener(move |this, _, window, cx| {
@@ -1006,14 +1026,14 @@ impl Lens {
     )
   }
 
-  fn change_row(&self, index: usize, change: &Change, name: &str, depth: usize, cx: &mut Context<Self>) -> Stateful<Div> {
+  fn change_row(&self, index: usize, change: &Change, name: &str, depth: usize, window_active: bool, cx: &mut Context<Self>) -> Stateful<Div> {
     let path = change.path.clone();
     let context_path = path.clone();
     let context_root = self.root.clone();
     let view = cx.entity().downgrade();
     div().id(("pending-context", index)).child(
       self
-        .row(index, change, name, depth, cx)
+        .row(index, change, name, depth, window_active, cx)
         .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
           window.focus(&this.pending_focus, cx);
           if this.busy {
@@ -1484,8 +1504,10 @@ impl Lens {
     )
   }
 
-  fn row(&self, index: usize, change: &Change, name: &str, depth: usize, cx: &App) -> Stateful<Div> {
+  fn row(&self, index: usize, change: &Change, name: &str, depth: usize, window_active: bool, cx: &App) -> Stateful<Div> {
     let rgb = palette(cx);
+    let selected = self.selection.paths.contains(&change.path);
+    let (selected_background, selected_foreground) = selected_row_palette(cx, window_active);
     let kind = match change.node_type.to_ascii_lowercase().as_str() {
       "directory" | "folder" => "Folder",
       "file" => "File",
@@ -1513,9 +1535,10 @@ impl Lens {
       .gap_2()
       .border_b_1()
       .border_color(rgb(Divider))
-      .bg(rgb(if self.selection.paths.contains(&change.path) { Selected } else { PANEL }))
+      .bg(if selected { selected_background } else { rgb(PANEL) })
+      .when(selected, |row| row.text_color(selected_foreground).font_weight(FontWeight::BOLD))
       .cursor_pointer()
-      .hover(|s| s.bg(rgb(Hover)))
+      .when(!selected, |row| row.hover(|style| style.bg(rgb(Hover))))
       .child(
         gpui_component::checkbox::Checkbox::new(("select-change", index))
           .checked(self.selection.paths.contains(&change.path))
@@ -1525,14 +1548,18 @@ impl Lens {
       .child(div().w(px(depth as f32 * 16.)).flex_shrink_0())
       .child(div().w(px(16.)).flex_shrink_0())
       .child(
-        div().w(px(16.)).flex_shrink_0().text_color(rgb(if kind == "Folder" { Warning } else { MUTED })).child(
-          gpui_component::Icon::new(match kind {
-            "Folder" => gpui_component::IconName::Folder,
-            "Link" => gpui_component::IconName::ExternalLink,
-            _ => gpui_component::IconName::File,
-          })
-          .size(px(16.)),
-        ),
+        div()
+          .w(px(16.))
+          .flex_shrink_0()
+          .text_color(if selected { selected_foreground } else { rgb(if kind == "Folder" { Warning } else { MUTED }) })
+          .child(
+            gpui_component::Icon::new(match kind {
+              "Folder" => gpui_component::IconName::Folder,
+              "Link" => gpui_component::IconName::ExternalLink,
+              _ => gpui_component::IconName::File,
+            })
+            .size(px(16.)),
+          ),
       )
       .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().child(name.to_string()))
       .child(
@@ -1540,13 +1567,17 @@ impl Lens {
           .w(px(90.))
           .flex_shrink_0()
           .text_size(px(11.))
-          .text_color(rgb(if matches!(change.action.as_str(), "remove" | "delete") {
-            Danger
-          } else if matches!(change.action.as_str(), "add" | "create") {
-            Success
+          .text_color(if selected {
+            selected_foreground
           } else {
-            MUTED
-          }))
+            rgb(if matches!(change.action.as_str(), "remove" | "delete") {
+              Danger
+            } else if matches!(change.action.as_str(), "add" | "create") {
+              Success
+            } else {
+              MUTED
+            })
+          })
           .child(t(&change.action)),
       )
       .child(
@@ -1554,13 +1585,17 @@ impl Lens {
           .w(px(110.))
           .flex_shrink_0()
           .text_size(px(11.))
-          .text_color(rgb(if state == "Conflict" {
-            Danger
-          } else if state == "Staged" {
-            Success
+          .text_color(if selected {
+            selected_foreground
           } else {
-            MUTED
-          }))
+            rgb(if state == "Conflict" {
+              Danger
+            } else if state == "Staged" {
+              Success
+            } else {
+              MUTED
+            })
+          })
           .child(t(state)),
       )
   }
@@ -1653,7 +1688,10 @@ fn main() {
             if active && !was_active {
               this.refresh_with_mode(true, cx);
             }
-            was_active = active;
+            if active != was_active {
+              was_active = active;
+              cx.notify();
+            }
           })
           .detach();
           cx.observe_window_appearance(window, |this, window, cx| {

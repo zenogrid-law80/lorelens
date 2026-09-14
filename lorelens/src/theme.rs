@@ -46,6 +46,17 @@ pub(crate) fn palette(cx: &App) -> impl Fn(ColorRole) -> Hsla + Copy + use<> {
   }
 }
 
+/// Keep selected rows prominent in the active window and neutral when the
+/// application is in the background.
+pub(crate) fn selected_row_palette(cx: &App, window_active: bool) -> (Hsla, Hsla) {
+  let colors = Theme::global(cx).colors;
+  if window_active {
+    (colors.accent, colors.accent_foreground)
+  } else {
+    (colors.muted, colors.foreground)
+  }
+}
+
 pub(super) fn apply_theme(value: &str, window: Option<&mut Window>, cx: &mut App) {
   match value {
     "System" => {

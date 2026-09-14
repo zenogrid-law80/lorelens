@@ -48,7 +48,7 @@ impl Lens {
     cx.notify();
   }
 
-  pub(super) fn render_file_browser(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+  pub(super) fn render_file_browser(&self, window_active: bool, cx: &mut Context<Self>) -> impl IntoElement + use<> {
     let rgb = palette(cx);
     let ready = !self.busy;
     let query = self.filter.read(cx).content.to_lowercase();
@@ -172,6 +172,8 @@ impl Lens {
       let toggle_path = path.clone();
       let change = self.status.changes.iter().find(|c| c.path == relative);
       let marker = change.map_or("", Change::file_marker);
+      let selected = self.selection.paths.contains(&relative);
+      let (selected_background, selected_foreground) = selected_row_palette(cx, window_active);
       files = files.child(
         div().id(("tree-context", i)).child(
           div()
@@ -182,9 +184,10 @@ impl Lens {
             .flex()
             .gap_2()
             .items_center()
-            .bg(rgb(if self.selection.paths.contains(&relative) { Selected } else { Sidebar }))
+            .bg(if selected { selected_background } else { rgb(Sidebar) })
+            .when(selected, |row| row.text_color(selected_foreground).font_weight(FontWeight::BOLD))
             .cursor_pointer()
-            .hover(|s| s.bg(rgb(Hover)))
+            .when(!selected, |row| row.hover(|style| style.bg(rgb(Hover))))
             .when(directory && ready, |row| {
               row
                 .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(rgb(Selected)))
@@ -203,7 +206,7 @@ impl Lens {
                   }
                 }))
                 .w(px(14.))
-                .text_color(rgb(MUTED))
+                .text_color(if selected { selected_foreground } else { rgb(MUTED) })
                 .when(directory, |toggle| {
                   toggle.child(Icon::new(if self.expanded_folders.contains(&path) { IconName::ChevronDown } else { IconName::ChevronRight }).size(px(14.)))
                 }),
@@ -215,17 +218,22 @@ impl Lens {
                 IconName::FileText
               })
               .size(px(16.))
-              .text_color(rgb(if directory { Warning } else { MUTED })),
+              .text_color(if selected { selected_foreground } else { rgb(if directory { Warning } else { MUTED }) }),
             )
             .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().child(label))
-            .child(div().text_size(px(10.)).text_color(rgb(Accent)).child(marker))
+            .child(div().text_size(px(10.)).text_color(if selected { selected_foreground } else { rgb(Accent) }).child(marker))
             .child(
               div()
                 .text_size(px(10.))
-                .text_color(rgb(Warning))
+                .text_color(if selected { selected_foreground } else { rgb(Warning) })
                 .child(if !directory && self.locked_paths.contains(&relative) { "L" } else { "" }),
             )
-            .child(div().text_size(px(10.)).text_color(rgb(MUTED)).child(if directory { String::new() } else { format_size(entry.size) }))
+            .child(
+              div()
+                .text_size(px(10.))
+                .text_color(if selected { selected_foreground } else { rgb(MUTED) })
+                .child(if directory { String::new() } else { format_size(entry.size) }),
+            )
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
               window.focus(&this.files_focus, cx);
               let modifiers = event.modifiers();

@@ -239,7 +239,7 @@ pub fn diff_revisions(
   let temporary = tempfile::Builder::new().prefix("lorelens-history-diff-").tempdir().map_err(|error| error.to_string())?;
   let name = Path::new(relative).file_name().ok_or_else(|| crate::i18n::t("Select a file to compare"))?;
   let snapshot = |label: &str, revision: &crate::backend::FileRevision| -> Result<std::path::PathBuf, String> {
-    let directory = temporary.path().join(format!("{label}-r{}", revision.number));
+    let directory = temporary.path().join(format!("{label}-{}", revision.hash.chars().take(10).collect::<String>()));
     fs::create_dir(&directory).map_err(|error| error.to_string())?;
     Ok(directory.join(name))
   };
@@ -274,6 +274,16 @@ pub fn diff_revisions(
     let _ = child.wait();
   });
   Ok(())
+}
+
+pub fn diff_commit_file(cli: &Path, root: &Path, comparison: &crate::backend::RevisionComparison, identity: Option<&str>, tool: Tool<'_>) -> Result<(), String> {
+  let revision = |hash: &str| crate::backend::FileRevision {
+    hash: hash.into(),
+    number: 0,
+    action: "edit".into(),
+    message: String::new(),
+  };
+  diff_revisions(cli, root, &comparison.path, &revision(&comparison.source), &revision(&comparison.target), identity, tool)
 }
 
 pub fn merge(root: &Path, relative: &str, tool: Tool<'_>) -> Result<(), String> {

@@ -3,6 +3,7 @@ use super::*;
 impl Render for Lens {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let rgb = palette(cx);
+    let window_active = window.is_window_active();
     let ready = !self.busy;
     let vcs = ready && self.connected;
     let sync_count = |commits: &Result<Vec<backend::LocalCommit>, String>| {
@@ -18,7 +19,7 @@ impl Render for Lens {
     let has_logs = !self.logs.is_empty();
 
     let sidebar_visible = !self.root.as_os_str().is_empty();
-    let sidebar = div().size_full().pr_1().flex().when(sidebar_visible, |d| d.child(self.render_file_browser(cx)));
+    let sidebar = div().size_full().pr_1().flex().when(sidebar_visible, |d| d.child(self.render_file_browser(window_active, cx)));
     let mut tabs = div().flex().flex_shrink_0().gap_2().px_3().border_b_1().border_color(rgb(BORDER));
     for (id, label, tab) in [
       ("pending-tab", "Changes", Tab::Pending),
@@ -111,11 +112,11 @@ impl Render for Lens {
         uniform_list(
           "pending-rows",
           self.pending_rows.len(),
-          cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
+          cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
             range
               .map(|i| match this.pending_rows[i].clone() {
-                PendingTreeRow::Folder { path, name, depth, change_index } => this.pending_folder_row(i, path, name, depth, change_index, cx),
-                PendingTreeRow::Change { index, name, depth } => this.change_row(index, &this.status.changes[index], &name, depth, cx),
+                row @ PendingTreeRow::Folder { .. } => this.pending_folder_row(i, row, window_active, cx),
+                PendingTreeRow::Change { index, name, depth } => this.change_row(index, &this.status.changes[index], &name, depth, window_active, cx),
               })
               .collect::<Vec<_>>()
           }),
@@ -208,59 +209,81 @@ impl Render for Lens {
           .border_b_1()
           .border_color(rgb(BORDER))
           .bg(rgb(PANEL))
-          .child(
-            div()
-              .h_full()
-              .flex()
-              .items_center()
-              .px_1()
-              .border_b_2()
-              .border_color(rgb(Accent))
-              .font_weight(FontWeight::SEMIBOLD)
-              .text_color(rgb(Accent))
-              .child(t("Command log")),
+          .children(
+            [("command-log-tab", "Command log", false), ("remote-history-tab", "Remote history", true)]
+              .into_iter()
+              .map(|(id, label, remote)| {
+                let active = self.remote_history.visible == remote;
+                div()
+                  .id(id)
+                  .h_full()
+                  .flex()
+                  .items_center()
+                  .flex_shrink_0()
+                  .px_1()
+                  .cursor_pointer()
+                  .border_b_2()
+                  .border_color(rgb(if active { Accent } else { PANEL }))
+                  .text_color(rgb(if active { Accent } else { MUTED }))
+                  .when(active, |tab| tab.font_weight(FontWeight::SEMIBOLD))
+                  .child(t(label))
+                  .on_click(cx.listener(move |this, _, _, cx| {
+                    if remote {
+                      this.activate_remote_history(cx);
+                    } else {
+                      this.remote_history.visible = false;
+                    }
+                    cx.notify();
+                  }))
+              }),
           )
-          .child(
-            div()
-              .flex_1()
-              .min_w_0()
-              .overflow_hidden()
-              .text_ellipsis()
-              .text_size(px(11.))
-              .text_color(rgb(MUTED))
-              .child(t(&self.output_title)),
-          )
-          .child(self.button("copy", "Copy", true).on_click(cx.listener(|this, _, _, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(this.logs.join("\n\n")));
-          })))
-          .child(self.button("clear-command-log", "Clear", has_logs).on_click(cx.listener(|this, _, _, cx| {
-            this.logs.clear();
-            cx.notify();
-          }))),
+          .when(!self.remote_history.visible, |header| {
+            header
+              .child(
+                div()
+                  .flex_1()
+                  .min_w_0()
+                  .overflow_hidden()
+                  .text_ellipsis()
+                  .text_size(px(11.))
+                  .text_color(rgb(MUTED))
+                  .child(t(&self.output_title)),
+              )
+              .child(self.button("copy", "Copy", true).on_click(cx.listener(|this, _, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(this.logs.join("\n\n")));
+              })))
+              .child(self.button("clear-command-log", "Clear", has_logs).on_click(cx.listener(|this, _, _, cx| {
+                this.logs.clear();
+                cx.notify();
+              })))
+          }),
       )
-      .child(
-        div()
-          .relative()
-          .flex_1()
-          .min_h_0()
-          .overflow_hidden()
-          .flex()
-          .flex_col()
-          .child(
-            div()
-              .id("detail-scroll")
-              .track_scroll(&self.command_log_scroll)
-              .flex_1()
-              .min_h_0()
-              .overflow_scroll()
-              .font_family(gpui_component::Theme::global(cx).mono_font_family.clone())
-              .text_size(px(12.))
-              .p_3()
-              .pr(px(24.))
-              .children(lines),
-          )
-          .child(gpui_component::scroll::Scrollbar::vertical(&self.command_log_scroll).mode(gpui_component::scroll::ScrollbarMode::Always)),
-      );
+      .when(self.remote_history.visible, |panel| panel.child(self.render_remote_history(window_active, cx)))
+      .when(!self.remote_history.visible, |panel| {
+        panel.child(
+          div()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .overflow_hidden()
+            .flex()
+            .flex_col()
+            .child(
+              div()
+                .id("detail-scroll")
+                .track_scroll(&self.command_log_scroll)
+                .flex_1()
+                .min_h_0()
+                .overflow_scroll()
+                .font_family(gpui_component::Theme::global(cx).mono_font_family.clone())
+                .text_size(px(12.))
+                .p_3()
+                .pr(px(24.))
+                .children(lines),
+            )
+            .child(gpui_component::scroll::Scrollbar::vertical(&self.command_log_scroll).mode(gpui_component::scroll::ScrollbarMode::Always)),
+        )
+      });
     let upper_panel = div()
       .size_full()
       .min_w_0()
@@ -456,7 +479,7 @@ impl Render for Lens {
     let right = if self.show_log && self.tab != Tab::Unpushed {
       v_resizable("content-command-log-split")
         .child(resizable_panel().size_range(px(320.)..Pixels::MAX).child(upper_panel))
-        .child(resizable_panel().size(px(270.)).size_range(px(140.)..px(600.)).child(div().size_full().pt_1().child(detail_panel)))
+        .child(resizable_panel().size(px(350.)).size_range(px(200.)..px(700.)).child(div().size_full().pt_1().child(detail_panel)))
         .into_any_element()
     } else {
       upper_panel.into_any_element()
