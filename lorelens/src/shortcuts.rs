@@ -219,6 +219,14 @@ impl Lens {
         if id == "revert" {
           self.revert_dialog(paths, false, window, cx);
         } else {
+          if self.status.changes.iter().any(|change| {
+            is_staged_modification(change)
+              && paths
+                .iter()
+                .any(|path| same_change_path(&change.path, path) || (self.root.join(path).is_dir() && change_path_is_within(&change.path, path)))
+          }) {
+            return;
+          }
           self.delete_files_dialog(paths.iter().map(|path| self.root.join(path)).collect(), window, cx);
         }
       }

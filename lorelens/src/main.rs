@@ -75,6 +75,27 @@ fn dialog_footer(id: &'static str, ok_text: String, show_cancel: bool) -> Dialog
     }))
 }
 
+fn is_staged_modification(change: &Change) -> bool {
+  let action = change.action.to_ascii_lowercase();
+  change.staged && !matches!(action.as_str(), "add" | "create" | "remove" | "delete")
+}
+
+fn same_change_path(left: &str, right: &str) -> bool {
+  let left = left.replace('\\', "/");
+  let right = right.replace('\\', "/");
+  if cfg!(windows) { left.eq_ignore_ascii_case(&right) } else { left == right }
+}
+
+fn change_path_is_within(path: &str, folder: &str) -> bool {
+  let mut path = path.replace('\\', "/");
+  let mut folder = folder.replace('\\', "/");
+  if cfg!(windows) {
+    path.make_ascii_lowercase();
+    folder.make_ascii_lowercase();
+  }
+  std::path::Path::new(&path).starts_with(std::path::Path::new(&folder))
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Tab {
   Files,
@@ -821,15 +842,42 @@ impl Lens {
           }
           cx.notify();
         }))
-        .context_menu(move |menu, _, cx| {
-          let enabled = view.upgrade().is_some_and(|entity| {
+        .context_menu(move |mut menu, _, cx| {
+          let Some((folder_paths, has_unstaged, has_staged, ready, vcs, exists, bookmarked, delete_allowed, shortcut_settings)) = view.upgrade().map(|entity| {
             let lens = entity.read(cx);
-            !lens.busy && lens.root == context_root && !state::pending_folder_paths(&lens.status.changes, &context_path).is_empty()
-          });
+            let folder_paths = if lens.root == context_root {
+              state::pending_folder_paths(&lens.status.changes, &context_path)
+            } else {
+              Vec::new()
+            };
+            let has_unstaged = lens.status.changes.iter().any(|change| folder_paths.contains(&change.path) && !change.staged && !change.conflict);
+            let has_staged = lens.status.changes.iter().any(|change| folder_paths.contains(&change.path) && change.staged);
+            let delete_allowed = !lens
+              .status
+              .changes
+              .iter()
+              .any(|change| folder_paths.iter().any(|path| same_change_path(&change.path, path)) && is_staged_modification(change));
+            let ready = !lens.busy && lens.root == context_root;
+            let absolute_path = context_root.join(&context_path);
+            (
+              folder_paths,
+              has_unstaged,
+              has_staged,
+              ready,
+              ready && lens.connected,
+              matches!(absolute_path.try_exists(), Ok(true)),
+              lens.settings.is_bookmarked(&context_root, &absolute_path),
+              delete_allowed,
+              lens.settings.shortcuts.clone(),
+            )
+          }) else {
+            return menu;
+          };
+          let enabled = ready && !folder_paths.is_empty();
           let select_view = view.clone();
           let select_root = context_root.clone();
           let select_path = context_path.clone();
-          menu.item(PopupMenuItem::new(t("Select all files in folder")).disabled(!enabled).on_click(move |_, _, cx| {
+          menu = menu.item(PopupMenuItem::new(t("Select all files in folder")).disabled(!enabled).on_click(move |_, _, cx| {
             let _ = select_view.update(cx, |this, cx| {
               if this.busy || this.root != select_root {
                 return;
@@ -843,7 +891,117 @@ impl Lens {
               this.notice = tf("{count} items selected", &[("count", paths.len().to_string())]);
               cx.notify();
             });
-          }))
+          }));
+          for (action, label, action_enabled) in [
+            ("stage", "Stage folder", vcs && has_unstaged),
+            ("unstage", "Unstage folder", vcs && has_staged),
+            ("reset", "Reset folder", vcs && !folder_paths.is_empty()),
+          ] {
+            let action_view = view.clone();
+            let action_root = context_root.clone();
+            let action_path = context_path.clone();
+            menu = menu.item(
+              PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, label, if action == "reset" { "reset" } else { action }))
+                .disabled(!action_enabled)
+                .on_click(move |_, window, cx| {
+                  let _ = action_view.update(cx, |this, cx| {
+                    if this.busy || !this.connected || this.root != action_root {
+                      return;
+                    }
+                    this.folder_changes_dialog(vec![action_path.clone()], action, window, cx);
+                  });
+                }),
+            );
+          }
+          let absolute_path = context_root.join(&context_path);
+          let move_view = view.clone();
+          let move_root = context_root.clone();
+          let move_path = absolute_path.clone();
+          let copy_path = absolute_path.clone();
+          let reveal_path = absolute_path.clone();
+          let terminal_path = absolute_path.clone();
+          let terminal_view = view.clone();
+          menu = menu
+            .separator()
+            .item(PopupMenuItem::new(t("Move…")).disabled(!ready || !exists).on_click(move |_, window, cx| {
+              let _ = move_view.update(cx, |this, cx| {
+                if !this.busy && this.root == move_root && matches!(move_path.try_exists(), Ok(true)) {
+                  this.move_dialog(move_path.clone(), window, cx);
+                }
+              });
+            }))
+            .separator()
+            .item(PopupMenuItem::new(t("Copy full path")).on_click(move |_, _, cx| {
+              cx.write_to_clipboard(ClipboardItem::new_string(copy_path.to_string_lossy().into_owned()));
+            }))
+            .item(
+              PopupMenuItem::new(shortcuts::shortcut_label(
+                &shortcut_settings,
+                if cfg!(target_os = "macos") { "Show in Finder" } else { "Show in Explorer" },
+                "reveal",
+              ))
+              .disabled(!ready || !exists)
+              .on_click(move |_, _, cx| cx.reveal_path(&reveal_path)),
+            )
+            .item(
+              PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Open Command Window Here", "terminal")).on_click(move |_, _, cx| {
+                let _ = terminal_view.update(cx, |this, cx| {
+                  this.open_command_window(&terminal_path);
+                  cx.notify();
+                });
+              }),
+            )
+            .separator();
+          let bookmark_view = view.clone();
+          let bookmark_root = context_root.clone();
+          let bookmark_path = absolute_path.clone();
+          menu = menu.item(
+            PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, if bookmarked { "Remove bookmark" } else { "Add bookmark" }, "bookmark"))
+              .disabled(!ready || !exists)
+              .on_click(move |_, _, cx| {
+                let _ = bookmark_view.update(cx, |this, cx| {
+                  if this.root != bookmark_root || !matches!(bookmark_path.try_exists(), Ok(true)) {
+                    return;
+                  }
+                  let added = this.settings.toggle_bookmark(&bookmark_root, &bookmark_path);
+                  if this.save_settings() {
+                    this.error = false;
+                    this.notice = tf(
+                      if added { "Bookmark added: {path}" } else { "Bookmark removed: {path}" },
+                      &[("path", bookmark_path.strip_prefix(&bookmark_root).unwrap_or(&bookmark_path).display().to_string())],
+                    );
+                  }
+                  cx.notify();
+                });
+              }),
+          );
+          let delete_view = view.clone();
+          let delete_root = context_root.clone();
+          let delete_relative = context_path.clone();
+          let delete_path = absolute_path;
+          if delete_allowed {
+            menu.separator().item(
+              PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Delete…", "delete"))
+                .disabled(!exists || !ready)
+                .on_click(move |_, window, cx| {
+                  let _ = delete_view.update(cx, |this, cx| {
+                    if !this.busy
+                      && this.root == delete_root
+                      && matches!(delete_path.try_exists(), Ok(true))
+                      && !this
+                        .status
+                        .changes
+                        .iter()
+                        .any(|change| change_path_is_within(&change.path, &delete_relative) && is_staged_modification(change))
+                    {
+                      this.delete_dialog(delete_path.clone(), window, cx);
+                    }
+                  });
+                }),
+            )
+          } else {
+            menu
+          }
         }),
     )
   }
@@ -884,7 +1042,7 @@ impl Lens {
           cx.notify();
         }))
         .context_menu(move |mut menu, _, cx| {
-          let Some((paths, stage_paths, unstage_paths, revert, enabled)) = view.upgrade().and_then(|entity| {
+          let Some((paths, stage_paths, unstage_paths, diff_path, resolve_path, context_file, context_exists, revert, ready, enabled)) = view.upgrade().and_then(|entity| {
             let lens = entity.read(cx);
             if lens.root != context_root {
               return None;
@@ -913,15 +1071,56 @@ impl Lens {
             if paths.is_empty() {
               return None;
             }
+            let diff_path = lens
+              .status
+              .changes
+              .iter()
+              .find(|change| change.path == context_path && change.file_marker() == "M" && !lens.root.join(&change.path).is_dir())
+              .map(|change| change.path.clone());
+            let resolve_path = lens
+              .status
+              .changes
+              .iter()
+              .find(|change| change.path == context_path && change.conflict)
+              .map(|change| change.path.clone());
+            let context_file = lens
+              .status
+              .changes
+              .iter()
+              .filter(|change| change.path == context_path)
+              .all(|change| !matches!(change.node_type.to_ascii_lowercase().as_str(), "directory" | "folder"))
+              && !lens.root.join(&context_path).is_dir();
+            let context_exists = matches!(lens.root.join(&context_path).try_exists(), Ok(true));
             let revert = revert || paths.len() > 1 || matches!(lens.root.join(&paths[0]).try_exists(), Ok(false));
-            Some((paths, stage_paths, unstage_paths, revert, !lens.busy && lens.connected))
+            Some((
+              paths,
+              stage_paths,
+              unstage_paths,
+              diff_path,
+              resolve_path,
+              context_file,
+              context_exists,
+              revert,
+              !lens.busy,
+              !lens.busy && lens.connected,
+            ))
           }) else {
             return menu;
           };
-          if !enabled {
-            return menu;
-          }
           let shortcut_settings = view.upgrade().map(|entity| entity.read(cx).settings.shortcuts.clone()).unwrap_or_default();
+          let mut selected_paths = paths.clone();
+          selected_paths.sort();
+          selected_paths.dedup();
+          let single_file = selected_paths.len() == 1 && context_file;
+          let delete_allowed = view.upgrade().is_some_and(|entity| {
+            let lens = entity.read(cx);
+            lens.root == context_root
+              && !lens
+                .status
+                .changes
+                .iter()
+                .any(|change| selected_paths.iter().any(|path| same_change_path(&change.path, path)) && is_staged_modification(change))
+          });
           if view
             .upgrade()
             .is_some_and(|entity| backend::duplicate_change_paths(&entity.read(cx).status.changes).contains(&context_path))
@@ -937,6 +1136,51 @@ impl Lens {
                 }
               });
             }));
+          }
+          if single_file {
+            let history_view = view.clone();
+            let history_root = context_root.clone();
+            let history_path = context_path.clone();
+            menu = menu.item(PopupMenuItem::new(t("File History")).disabled(!enabled).on_click(move |_, _, cx| {
+              let _ = history_view.update(cx, |this, cx| {
+                if !this.busy && this.connected && this.root == history_root {
+                  this.open_file_history(history_path.clone(), 100, cx);
+                }
+              });
+            }));
+          }
+          if single_file && let Some(resolve_path) = resolve_path {
+            let resolve_view = view.clone();
+            let resolve_root = context_root.clone();
+            menu = menu
+              .item(
+                PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Resolve", "diff"))
+                  .disabled(!enabled)
+                  .on_click(move |_, window, cx| {
+                    let _ = resolve_view.update(cx, |this, cx| {
+                      if !this.busy && this.connected && this.root == resolve_root && this.status.changes.iter().any(|change| change.path == resolve_path && change.conflict) {
+                        this.resolve_or_diff(resolve_path.clone(), window, cx);
+                      }
+                    });
+                  }),
+              )
+              .separator();
+          } else if single_file && let Some(diff_path) = diff_path {
+            let diff_view = view.clone();
+            let diff_root = context_root.clone();
+            menu = menu
+              .item(
+                PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Diff", "diff"))
+                  .disabled(!enabled)
+                  .on_click(move |_, _, cx| {
+                    let _ = diff_view.update(cx, |this, cx| {
+                      if !this.busy && this.connected && this.root == diff_root && this.status.changes.iter().any(|change| change.path == diff_path && change.file_marker() == "M") {
+                        this.external_diff(diff_path.clone(), cx);
+                      }
+                    });
+                  }),
+              )
+              .separator();
           }
           if !stage_paths.is_empty() {
             let view = view.clone();
@@ -984,6 +1228,206 @@ impl Lens {
                 });
               }),
             );
+          }
+          if selected_paths.len() > 1 {
+            let copy_paths = selected_paths.iter().map(|path| context_root.join(path).to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
+            let delete_sources = selected_paths
+              .iter()
+              .map(|path| context_root.join(path))
+              .filter(|path| matches!(path.try_exists(), Ok(true)))
+              .collect::<Vec<_>>();
+            let delete_enabled = ready && !delete_sources.is_empty();
+            menu = menu.separator().item(PopupMenuItem::new(t("Copy selected full paths")).on_click(move |_, _, cx| {
+              cx.write_to_clipboard(ClipboardItem::new_string(copy_paths.clone()));
+            }));
+            if delete_allowed {
+              let delete_view = view.clone();
+              let delete_root = context_root.clone();
+              let delete_paths = selected_paths.clone();
+              menu = menu.item(
+                PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Delete…", "delete"))
+                  .disabled(!delete_enabled)
+                  .on_click(move |_, window, cx| {
+                    let _ = delete_view.update(cx, |this, cx| {
+                      if !this.busy
+                        && this.root == delete_root
+                        && !this
+                          .status
+                          .changes
+                          .iter()
+                          .any(|change| delete_paths.iter().any(|path| same_change_path(&change.path, path)) && is_staged_modification(change))
+                      {
+                        this.delete_files_dialog(delete_sources.clone(), window, cx);
+                      }
+                    });
+                  }),
+              );
+            }
+          } else if single_file {
+            let absolute_path = context_root.join(&context_path);
+            let move_view = view.clone();
+            let move_root = context_root.clone();
+            let move_path = absolute_path.clone();
+            let copy_path = absolute_path.clone();
+            let reveal_path = absolute_path.clone();
+            let terminal_path = absolute_path.clone();
+            let terminal_view = view.clone();
+            menu = menu
+              .item(PopupMenuItem::new(t("Move…")).disabled(!ready || !context_exists).on_click(move |_, window, cx| {
+                let _ = move_view.update(cx, |this, cx| {
+                  if !this.busy && this.root == move_root && matches!(move_path.try_exists(), Ok(true)) {
+                    this.move_dialog(move_path.clone(), window, cx);
+                  }
+                });
+              }))
+              .separator()
+              .item(PopupMenuItem::new(t("Copy full path")).on_click(move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(copy_path.to_string_lossy().into_owned()));
+              }))
+              .item(
+                PopupMenuItem::new(shortcuts::shortcut_label(
+                  &shortcut_settings,
+                  if cfg!(target_os = "macos") { "Show in Finder" } else { "Show in Explorer" },
+                  "reveal",
+                ))
+                .disabled(!ready || !context_exists)
+                .on_click(move |_, _, cx| {
+                  cx.reveal_path(&reveal_path);
+                }),
+              )
+              .item(
+                PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Open Command Window Here", "terminal")).on_click(move |_, _, cx| {
+                  let _ = terminal_view.update(cx, |this, cx| {
+                    this.open_command_window(&terminal_path);
+                    cx.notify();
+                  });
+                }),
+              )
+              .separator();
+            let bookmark_view = view.clone();
+            let bookmark_root = context_root.clone();
+            let bookmark_path = absolute_path.clone();
+            let bookmarked = view.upgrade().is_some_and(|entity| entity.read(cx).settings.is_bookmarked(&context_root, &absolute_path));
+            menu = menu.item(
+              PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, if bookmarked { "Remove bookmark" } else { "Add bookmark" }, "bookmark"))
+                .disabled(!ready || !context_exists)
+                .on_click(move |_, _, cx| {
+                  let _ = bookmark_view.update(cx, |this, cx| {
+                    if this.root != bookmark_root || !matches!(bookmark_path.try_exists(), Ok(true)) {
+                      return;
+                    }
+                    let added = this.settings.toggle_bookmark(&bookmark_root, &bookmark_path);
+                    if this.save_settings() {
+                      this.error = false;
+                      this.notice = tf(
+                        if added { "Bookmark added: {path}" } else { "Bookmark removed: {path}" },
+                        &[("path", bookmark_path.strip_prefix(&bookmark_root).unwrap_or(&bookmark_path).display().to_string())],
+                      );
+                    }
+                    cx.notify();
+                  });
+                }),
+            );
+            if context_exists && enabled {
+              let state = std::rc::Rc::new(std::cell::RefCell::new(None::<Result<bool, String>>));
+              let display_state = state.clone();
+              let action_state = state.clone();
+              let action_view = view.clone();
+              let action_path = absolute_path.clone();
+              let root = context_root.clone();
+              let cli = view.upgrade().map(|entity| entity.read(cx).cli.clone()).unwrap_or_default();
+              let identity = view.upgrade().and_then(|entity| entity.read(cx).settings.identity.clone());
+              let query_path = absolute_path.clone();
+              let original_root = context_root.clone();
+              let lock_shortcuts = shortcut_settings.clone();
+              let task = cx.background_executor().spawn(async move {
+                backend::run_as(
+                  &cli,
+                  &root,
+                  &["lock".into(), "status".into(), "--".into(), query_path.to_string_lossy().into_owned()],
+                  true,
+                  identity.as_deref(),
+                )
+                .and_then(|output| backend::parse_lock_status(&output))
+              });
+              let error_view = view.clone();
+              cx.spawn(async move |menu, cx| {
+                let result = task.await;
+                if let Err(error) = &result {
+                  let error = error.clone();
+                  let _ = error_view.update(cx, |this, cx| {
+                    this.log(format!("Lock status failed: {error}"));
+                    cx.notify();
+                  });
+                }
+                *state.borrow_mut() = Some(result);
+                let _ = menu.update(cx, |_, cx| cx.notify());
+              })
+              .detach();
+              menu = menu
+                .item(
+                  PopupMenuItem::element(move |_, _| {
+                    div().child(shortcuts::shortcut_label(
+                      &lock_shortcuts,
+                      match display_state.borrow().as_ref() {
+                        None => "Checking lock status…",
+                        Some(Ok(true)) => "Unlock",
+                        Some(Ok(false)) => "Lock",
+                        Some(Err(_)) => "Lock status unavailable — reopen to retry",
+                      },
+                      "lock",
+                    ))
+                  })
+                  .on_click(move |_, _, cx| {
+                    let Some(Ok(locked)) = action_state.borrow().as_ref().cloned() else {
+                      return;
+                    };
+                    let _ = action_view.update(cx, |this, cx| {
+                      if this.busy || !this.connected || this.root != original_root {
+                        return;
+                      }
+                      this.command(
+                        vec![
+                          "lock".into(),
+                          if locked { "release" } else { "acquire" }.into(),
+                          "--".into(),
+                          action_path.to_string_lossy().into_owned(),
+                        ],
+                        if locked { "Unlock" } else { "Lock" },
+                        false,
+                        true,
+                        cx,
+                      );
+                    });
+                  }),
+                )
+                .separator();
+            }
+            if delete_allowed {
+              let delete_view = view.clone();
+              let delete_root = context_root.clone();
+              let delete_relative = context_path.clone();
+              let delete_path = absolute_path;
+              menu = menu.item(
+                PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Delete…", "delete"))
+                  .disabled(!ready || !context_exists)
+                  .on_click(move |_, window, cx| {
+                    let _ = delete_view.update(cx, |this, cx| {
+                      if !this.busy
+                        && this.root == delete_root
+                        && matches!(delete_path.try_exists(), Ok(true))
+                        && !this
+                          .status
+                          .changes
+                          .iter()
+                          .any(|change| same_change_path(&change.path, &delete_relative) && is_staged_modification(change))
+                      {
+                        this.delete_dialog(delete_path.clone(), window, cx);
+                      }
+                    });
+                  }),
+              );
+            }
           }
           // Obliterate resolves the current/staged node. Untracked additions and
           // staged deletions have no eligible node to remove.

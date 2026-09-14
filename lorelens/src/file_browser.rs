@@ -323,6 +323,12 @@ impl Lens {
                   })
                   .cloned()
                   .collect();
+                let delete_allowed = !lens.status.changes.iter().any(|change| {
+                  is_staged_modification(change)
+                    && selected_paths
+                      .iter()
+                      .any(|path| same_change_path(&change.path, path) || (lens.root.join(path).is_dir() && change_path_is_within(&change.path, path)))
+                });
                 let mut menu = menu;
                 for (action, label) in [("stage", "Stage selected"), ("unstage", "Unstage selected"), ("reset", "Reset selected files")] {
                   let paths: Vec<_> = changes
@@ -369,24 +375,32 @@ impl Lens {
                 }
                 let sources: Vec<_> = selected_paths.iter().map(|p| context_root.join(p)).collect();
                 let copy = sources.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n");
-                let delete_view = view.clone();
-                let root = context_root.clone();
-                menu = menu
-                  .separator()
-                  .item(PopupMenuItem::new(t("Copy selected full paths")).on_click(move |_, _, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
-                  }))
-                  .item(
+                menu = menu.separator().item(PopupMenuItem::new(t("Copy selected full paths")).on_click(move |_, _, cx| {
+                  cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
+                }));
+                if delete_allowed {
+                  let delete_view = view.clone();
+                  let root = context_root.clone();
+                  let delete_targets = selected_paths.clone();
+                  menu = menu.item(
                     PopupMenuItem::new(shortcuts::shortcut_label(&shortcuts, "Delete…", "delete"))
                       .disabled(!ready)
                       .on_click(move |_, window, cx| {
                         let _ = delete_view.update(cx, |this, cx| {
-                          if this.root == root {
+                          if this.root == root
+                            && !this.status.changes.iter().any(|change| {
+                              is_staged_modification(change)
+                                && delete_targets
+                                  .iter()
+                                  .any(|path| same_change_path(&change.path, path) || (this.root.join(path).is_dir() && change_path_is_within(&change.path, path)))
+                            })
+                          {
                             this.delete_files_dialog(sources.clone(), window, cx);
                           }
                         });
                       }),
                   );
+                }
                 if lens.obliterate_enabled && !has_folders {
                   let root = context_root.clone();
                   let action_view = view.clone();
@@ -667,9 +681,19 @@ impl Lens {
               let delete_view = view.clone();
               let delete_path = context_path.clone();
               let delete_root = context_root.clone();
+              let delete_relative = context_relative.clone();
               let delete_enabled = view.upgrade().is_some_and(|entity| {
                 let lens = entity.read(cx);
                 !lens.busy && lens.root == context_root
+              });
+              let delete_allowed = view.upgrade().is_some_and(|entity| {
+                let lens = entity.read(cx);
+                lens.root == context_root
+                  && !lens
+                    .status
+                    .changes
+                    .iter()
+                    .any(|change| is_staged_modification(change) && (same_change_path(&change.path, &context_relative) || (directory && change_path_is_within(&change.path, &context_relative))))
               });
               let move_path = context_path.clone();
               let move_root = context_root.clone();
@@ -804,17 +828,26 @@ impl Lens {
               } else {
                 menu
               };
-              let menu = menu.item(
-                PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Delete…", "delete"))
-                  .disabled(!delete_enabled)
-                  .on_click(move |_, window, cx| {
-                    let _ = delete_view.update(cx, |this, cx| {
-                      if this.root == delete_root {
-                        this.delete_dialog(delete_path.clone(), window, cx);
-                      }
-                    });
-                  }),
-              );
+              let menu = if delete_allowed {
+                menu.item(
+                  PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Delete…", "delete"))
+                    .disabled(!delete_enabled)
+                    .on_click(move |_, window, cx| {
+                      let _ =
+                        delete_view.update(cx, |this, cx| {
+                          if this.root == delete_root
+                            && !this.status.changes.iter().any(|change| {
+                              is_staged_modification(change) && (same_change_path(&change.path, &delete_relative) || (directory && change_path_is_within(&change.path, &delete_relative)))
+                            })
+                          {
+                            this.delete_dialog(delete_path.clone(), window, cx);
+                          }
+                        });
+                    }),
+                )
+              } else {
+                menu
+              };
               if !directory && view.upgrade().is_some_and(|entity| entity.read(cx).obliterate_enabled) {
                 let action_view = view.clone();
                 let path = context_relative.clone();
