@@ -108,7 +108,7 @@ impl Lens {
                   "login" => this.login_dialog(window, cx),
                   "logout" => this.logout_dialog(window, cx),
                   "theme" => this.theme_dialog(window, cx),
-                  "System" | "Light" | "Dark" => {
+                  "System" | "LoreLens Light" | "LoreLens Dark" => {
                     this.settings.theme = action.into();
                     defer_theme(action, window, cx);
                     this.save_settings();

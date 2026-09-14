@@ -104,29 +104,34 @@ fn split_arguments(template: &str) -> Result<Vec<String>, String> {
 pub fn arguments(tool: &str, custom: Option<&str>, merge: bool, base: &Path, theirs: &Path, yours: &Path, result: &Path) -> Result<Vec<OsString>, String> {
   let path = |p: &Path| p.as_os_str().to_owned();
   Ok(match tool {
-    "idea" if merge => vec!["merge".into(), path(theirs), path(yours), path(base), path(result)],
+    "idea" if merge => vec!["merge".into(), path(yours), path(theirs), path(base), path(result)],
     "idea" => vec!["diff".into(), path(base), path(yours)],
-    "p4merge" => vec![path(base), path(theirs), path(yours), path(result)],
-    "TortoiseGitMerge" => [("/base:", base), ("/mine:", yours), ("/theirs:", theirs), ("/merged:", result)]
-      .into_iter()
-      .map(|(prefix, p)| {
-        let mut arg = OsString::from(prefix);
-        arg.push(p);
-        arg
-      })
-      .collect(),
-    "WinMergeU" if merge => vec![
-      "/e".into(),
-      "/u".into(),
-      "/wl".into(),
-      "/wm".into(),
-      "/wr".into(),
-      path(base),
-      path(yours),
-      path(theirs),
-      "/o".into(),
-      path(result),
-    ],
+    "p4merge" if merge => vec![path(base), path(theirs), path(yours), path(result)],
+    "p4merge" => vec![path(base), path(yours)],
+    "TortoiseGitMerge" => {
+      let switches = if merge {
+        vec![("/base:", base), ("/theirs:", theirs), ("/mine:", yours), ("/merged:", result)]
+      } else {
+        vec![("/base:", base), ("/mine:", yours)]
+      };
+      let mut arguments = switches
+        .into_iter()
+        .map(|(prefix, p)| {
+          let mut argument = OsString::from(prefix);
+          argument.push(p);
+          argument
+        })
+        .collect::<Vec<_>>();
+      if merge {
+        arguments.push("/saverequiredonconflicts".into());
+      }
+      arguments
+    }
+    "WinMergeU" if merge => {
+      let mut arguments = vec!["/e".into(), "/u".into(), "/wl".into(), "/wr".into(), "/am".into()];
+      arguments.extend([path(theirs), path(base), path(yours), "/o".into(), path(result)]);
+      arguments
+    }
     "WinMergeU" => vec!["/e".into(), "/u".into(), path(base), path(yours)],
     "custom" => split_arguments(custom.unwrap_or_default())?
       .into_iter()
@@ -345,21 +350,22 @@ mod tests {
     let t = Path::new("theirs.txt");
     let y = Path::new("local file.txt");
     let r = Path::new("result.txt");
-    for tool in ["idea"] {
-      assert_eq!(arguments(tool, None, false, b, t, y, r).unwrap(), vec![OsString::from("diff"), b.into(), y.into()]);
-      assert_eq!(arguments(tool, None, true, b, t, y, r).unwrap(), vec![OsString::from("merge"), t.into(), y.into(), b.into(), r.into()]);
-    }
-    for merge in [false, true] {
-      assert_eq!(arguments("p4merge", None, merge, b, t, y, r).unwrap(), vec![b.as_os_str(), t.as_os_str(), y.as_os_str(), r.as_os_str()]);
-      assert_eq!(
-        arguments("TortoiseGitMerge", None, merge, b, t, y, r).unwrap(),
-        vec!["/base:base 한글.txt", "/mine:local file.txt", "/theirs:theirs.txt", "/merged:result.txt"]
-      );
-    }
+    assert_eq!(arguments("idea", None, false, b, t, y, r).unwrap(), vec![OsString::from("diff"), b.into(), y.into()]);
+    assert_eq!(
+      arguments("idea", None, true, b, t, y, r).unwrap(),
+      vec![OsString::from("merge"), y.into(), t.into(), b.into(), r.into()]
+    );
+    assert_eq!(arguments("p4merge", None, true, b, t, y, r).unwrap(), vec![b.as_os_str(), t.as_os_str(), y.as_os_str(), r.as_os_str()]);
+    assert_eq!(
+      arguments("TortoiseGitMerge", None, true, b, t, y, r).unwrap(),
+      vec!["/base:base 한글.txt", "/theirs:theirs.txt", "/mine:local file.txt", "/merged:result.txt", "/saverequiredonconflicts"]
+    );
+    assert_eq!(arguments("p4merge", None, false, b, t, y, r).unwrap(), vec![b.as_os_str(), y.as_os_str()]);
+    assert_eq!(arguments("TortoiseGitMerge", None, false, b, t, y, r).unwrap(), vec!["/base:base 한글.txt", "/mine:local file.txt"]);
     assert_eq!(arguments("WinMergeU", None, false, b, t, y, r).unwrap(), vec!["/e", "/u", "base 한글.txt", "local file.txt"]);
     assert_eq!(
       arguments("WinMergeU", None, true, b, t, y, r).unwrap(),
-      vec!["/e", "/u", "/wl", "/wm", "/wr", "base 한글.txt", "local file.txt", "theirs.txt", "/o", "result.txt"]
+      vec!["/e", "/u", "/wl", "/wr", "/am", "theirs.txt", "base 한글.txt", "local file.txt", "/o", "result.txt"]
     );
     assert_eq!(
       arguments("custom", Some("--wait \"{base}\" '{yours}' {result}"), false, b, t, y, r).unwrap(),

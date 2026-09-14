@@ -1,5 +1,75 @@
 use super::*;
-use gpui_component::scroll::ScrollableElement as _;
+
+fn conflict_file_name(path: &str) -> &str {
+  path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+fn conflict_extension(path: &str) -> &str {
+  conflict_file_name(path)
+    .rsplit_once('.')
+    .filter(|(stem, extension)| !stem.is_empty() && !extension.is_empty())
+    .map_or("", |(_, extension)| extension)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConflictFilter {
+  FileName,
+  Extension,
+}
+
+fn conflict_matches_filter(entry: &ConflictDialogEntry, query: &str, filter: ConflictFilter) -> bool {
+  let query = query.trim().to_lowercase();
+  match filter {
+    ConflictFilter::FileName => conflict_file_name(&entry.path).to_lowercase().contains(&query),
+    ConflictFilter::Extension => conflict_extension(&entry.path).to_lowercase().contains(query.trim_start_matches('.')),
+  }
+}
+
+fn normalized_conflict_path(path: &str) -> String {
+  path.replace('\\', "/").to_lowercase()
+}
+
+fn select_conflict_path(selected: &mut std::collections::HashSet<String>, anchor: &mut Option<String>, path: String, visible: &[String], additive: bool, range: bool) {
+  if range {
+    let start = anchor.as_ref().and_then(|anchor| visible.iter().position(|visible_path| visible_path == anchor));
+    let end = visible.iter().position(|visible_path| visible_path == &path);
+    if !additive {
+      selected.clear();
+    }
+    if let (Some(start), Some(end)) = (start, end) {
+      selected.extend(visible[start.min(end)..=start.max(end)].iter().cloned());
+    } else {
+      selected.insert(path.clone());
+      *anchor = Some(path);
+    }
+  } else {
+    if !additive {
+      selected.clear();
+    }
+    if !selected.remove(&path) {
+      selected.insert(path.clone());
+    }
+    *anchor = Some(path);
+  }
+}
+
+fn sort_conflict_entries(entries: &mut [ConflictDialogEntry], sort: ConflictSort) {
+  entries.sort_by(|left, right| {
+    let left_name = conflict_file_name(&left.path).to_lowercase();
+    let right_name = conflict_file_name(&right.path).to_lowercase();
+    let left_path = normalized_conflict_path(&left.path);
+    let right_path = normalized_conflict_path(&right.path);
+    let primary = match sort {
+      ConflictSort::FileName => left_name.cmp(&right_name),
+      ConflictSort::Extension => conflict_extension(&left.path)
+        .to_lowercase()
+        .cmp(&conflict_extension(&right.path).to_lowercase())
+        .then_with(|| left_name.cmp(&right_name)),
+      ConflictSort::FullPath => left_path.cmp(&right_path),
+    };
+    primary.then_with(|| left_path.cmp(&right_path)).then_with(|| left.path.cmp(&right.path))
+  });
+}
 
 fn valid_lore_remote(value: &str, repository_required: bool) -> bool {
   if value.chars().any(char::is_whitespace) {
@@ -96,98 +166,368 @@ impl Lens {
     if self.busy || !self.connected {
       return;
     }
-    if !self.status.changes.iter().any(|change| change.path == path && change.conflict) || !backend::is_binary_merge(&self.root, &path) {
-      self.external_diff(path, cx);
+    if !self.status.changes.iter().any(|change| change.path == path && change.conflict) {
       return;
     }
+    self.merge_conflicts_dialog(window, cx);
+  }
+
+  pub(super) fn merge_conflicts_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if self.busy || !self.connected || self.conflict_dialog_open {
+      return;
+    }
+    let conflicts = self.status.changes.iter().filter(|change| change.conflict).map(|change| change.path.clone()).collect::<Vec<_>>();
+    if conflicts.is_empty() {
+      return;
+    }
+    self.conflict_dialog_pending = false;
+    self.conflict_dialog_open = true;
+    self.prompted_conflicts.extend(conflicts);
+    self.conflict_dialog_selection.borrow_mut().clear();
     let root = self.root.clone();
     let branch = self.status.branch.clone();
+    // Dialog builders run while Lens is already borrowed for rendering. Keep
+    // the changing conflict list in a separate snapshot to avoid reentrant reads.
+    let dialog_entries = self.conflict_dialog_entries.clone();
+    let dialog_selection = self.conflict_dialog_selection.clone();
+    let dialog_working = self.conflict_dialog_working.clone();
+    let dialog_sort = self.conflict_dialog_sort.clone();
+    let dialog_scroll = ScrollHandle::new();
+    let dialog_anchor = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
+    let conflict_filter = cx.new(|cx| TextInput::new("Contains…", cx));
+    let conflict_filter_target = std::rc::Rc::new(std::cell::Cell::new(ConflictFilter::FileName));
+    cx.observe(&conflict_filter, |_, _, cx| cx.notify()).detach();
     let view = cx.entity().downgrade();
-    window.open_dialog(cx, move |dialog, _, _| {
-      let mut choices = div().flex().gap_2();
-      for (id, label, side) in [
-        ("binary-base", "Mine (Base)", backend::BinarySide::Base),
-        ("binary-theirs", "Remote (Theirs)", backend::BinarySide::Theirs),
-      ] {
-        let view = view.clone();
-        let root = root.clone();
-        let branch = branch.clone();
-        let path = path.clone();
-        choices = choices.child(Button::new(id).label(t(label)).on_click(move |_, window, cx| {
-          window.close_dialog(cx);
-          let _ = view.update(cx, |this, cx| {
-            if this.busy || !this.connected || this.root != root || this.status.branch != branch || !this.status.changes.iter().any(|change| change.path == path && change.conflict) {
-              return;
-            }
-            this.busy = true;
-            this.preview.invalidate();
-            let root = root.clone();
-            let path = path.clone();
-            let task_path = path.clone();
-            let task = cx.background_executor().spawn(async move { backend::select_binary_merge(&root, &task_path, side) });
-            cx.spawn(async move |this, cx| {
-              let result = task.await;
-              let _ = this.update(cx, |this, cx| {
-                this.busy = false;
-                match result {
-                  Ok(()) => this.command(vec!["branch".into(), "merge".into(), "resolve".into(), "--".into(), path], "Resolve merge conflict", false, true, cx),
-                  Err(error) => {
-                    this.notice = error;
-                    this.error = true;
-                  }
+    window.open_dialog(cx, move |dialog, _, cx| {
+      let mut entries = dialog_entries.borrow().clone();
+      let total_count = entries.len();
+      let auto_merge_paths = entries
+        .iter()
+        .filter(|entry| entry.inputs == Some(backend::MergeInputs::ThreeWay))
+        .map(|entry| entry.path.clone())
+        .collect::<std::collections::HashSet<_>>();
+      let filter_query = conflict_filter.read(cx).content.to_string();
+      let filter_target = conflict_filter_target.get();
+      entries.retain(|entry| conflict_matches_filter(entry, &filter_query, filter_target));
+      let selected_paths = dialog_selection.borrow().clone();
+      let working = dialog_working.get();
+      let sort = dialog_sort.get();
+      sort_conflict_entries(&mut entries, sort);
+      let colors = palette(cx);
+      let selectable_paths = entries.iter().filter(|entry| entry.inputs.is_some()).map(|entry| entry.path.clone()).collect::<Vec<_>>();
+      let visible_paths = std::rc::Rc::new(selectable_paths.clone());
+      let all_selected = !selectable_paths.is_empty() && selectable_paths.iter().all(|path| selected_paths.contains(path));
+      let select_all_paths = selectable_paths.clone();
+      let select_all = dialog_selection.clone();
+      let select_all_anchor = dialog_anchor.clone();
+      let mut bulk_actions = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(
+          gpui_component::checkbox::Checkbox::new("select-all-merge-conflicts")
+            .checked(all_selected)
+            .disabled(working || selectable_paths.is_empty())
+            .label(t("Select all"))
+            .on_click(move |checked: &bool, window, _| {
+              let mut selected = select_all.borrow_mut();
+              if *checked {
+                selected.extend(select_all_paths.iter().cloned());
+                if select_all_anchor.borrow().as_ref().is_none_or(|anchor| !select_all_paths.contains(anchor)) {
+                  *select_all_anchor.borrow_mut() = select_all_paths.first().cloned();
                 }
-                cx.notify();
-              });
+              } else {
+                selected.retain(|path| !select_all_paths.contains(path));
+                if select_all_anchor.borrow().as_ref().is_some_and(|anchor| select_all_paths.contains(anchor)) {
+                  *select_all_anchor.borrow_mut() = None;
+                }
+              }
+              window.refresh();
+            }),
+        )
+        .child({
+          let sort_state = dialog_sort.clone();
+          let sort_label = match sort {
+            ConflictSort::FileName => t("File name"),
+            ConflictSort::Extension => t("Extension"),
+            ConflictSort::FullPath => t("Full path"),
+          };
+          Button::new("conflict-sort")
+            .small()
+            .label(format!("{}: {} ▾", t("Sort"), sort_label))
+            .dropdown_menu(move |mut menu, _, _| {
+              for (label, value) in [("File name", ConflictSort::FileName), ("Extension", ConflictSort::Extension), ("Full path", ConflictSort::FullPath)] {
+                let item_state = sort_state.clone();
+                menu = menu.item(PopupMenuItem::new(t(label)).checked(sort_state.get() == value).on_click(move |_, window, _| {
+                  item_state.set(value);
+                  window.refresh();
+                }));
+              }
+              menu
             })
-            .detach();
-            cx.notify();
+        });
+      bulk_actions = bulk_actions.child(div().flex_1()).child(tf("{count} selected", &[("count", selected_paths.len().to_string())]));
+      let merge_enabled = !selected_paths.is_empty() && selected_paths.iter().all(|path| auto_merge_paths.contains(path));
+      let merge_view = view.clone();
+      let merge_root = root.clone();
+      let merge_branch = branch.clone();
+      let merge_selection = dialog_selection.clone();
+      bulk_actions = bulk_actions.child(
+        Button::new("bulk-conflict-merge")
+          .small()
+          .disabled(working || !merge_enabled)
+          .label(t("Use Merge"))
+          .on_click(move |_, _, cx| {
+            let paths = merge_selection.borrow().iter().cloned().collect::<Vec<_>>();
+            let _ = merge_view.update(cx, |this, cx| {
+              if !this.busy && this.connected && this.root == merge_root && this.status.branch == merge_branch {
+                this.external_merge(paths, cx);
+              }
+            });
+          }),
+      );
+      for (id, label, side) in [
+        ("bulk-conflict-mine", "Use Mine", backend::MergeSide::Mine),
+        ("bulk-conflict-theirs", "Use Theirs", backend::MergeSide::Theirs),
+      ] {
+        let bulk_view = view.clone();
+        let bulk_root = root.clone();
+        let bulk_branch = branch.clone();
+        let bulk_selection = dialog_selection.clone();
+        bulk_actions = bulk_actions.child(Button::new(id).small().disabled(working || selected_paths.is_empty()).label(t(label)).on_click(move |_, _, cx| {
+          let paths = bulk_selection.borrow().iter().cloned().collect::<Vec<_>>();
+          let _ = bulk_view.update(cx, |this, cx| {
+            if !this.busy && this.connected && this.root == bulk_root && this.status.branch == bulk_branch {
+              this.resolve_conflict_sides(paths, side, cx);
+            }
           });
         }));
       }
+      let filter_target_state = conflict_filter_target.clone();
+      let filters = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(format!("{}:", t("Contains")))
+        .child(div().flex_1().min_w_0().child(conflict_filter.clone()))
+        .child(
+          gpui_component::radio::RadioGroup::horizontal("conflict-filter-target")
+            .child(t("File name"))
+            .child(t("Extension"))
+            .selected_index(Some(if filter_target == ConflictFilter::FileName { 0 } else { 1 }))
+            .on_click(move |index, window, _| {
+              filter_target_state.set(if *index == 1 { ConflictFilter::Extension } else { ConflictFilter::FileName });
+              window.refresh();
+            }),
+        );
+      let mut tree = div().id("merge-conflict-tree").max_h(px(480.)).overflow_y_scroll().pr(px(12.)).track_scroll(&dialog_scroll);
+      if entries.is_empty() {
+        tree = tree.child(div().p_4().text_color(colors(MUTED)).child(t("No matching files.")));
+      }
+      for (index, entry) in entries.into_iter().enumerate() {
+        let path = entry.path;
+        let display_path = path.replace('\\', "/");
+        let inputs = entry.inputs;
+        let file_selected = selected_paths.contains(&path);
+        let mut choices = div().flex().items_center().gap_2().flex_shrink_0();
+        if inputs == Some(backend::MergeInputs::ThreeWay) {
+          let merge_view = view.clone();
+          let merge_root = root.clone();
+          let merge_branch = branch.clone();
+          let merge_path = path.clone();
+          choices = choices.child(Button::new(("conflict-merge", index)).primary().small().disabled(working).label(t("Merge")).on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            let _ = merge_view.update(cx, |this, cx| {
+              if !this.busy && this.connected && this.root == merge_root && this.status.branch == merge_branch && this.status.changes.iter().any(|change| change.path == merge_path && change.conflict)
+              {
+                this.external_merge(vec![merge_path.clone()], cx);
+              }
+            });
+          }));
+        }
+        if inputs.is_some() {
+          for (id, label, side) in [("conflict-mine", "Mine", backend::MergeSide::Mine), ("conflict-theirs", "Theirs", backend::MergeSide::Theirs)] {
+            let side_view = view.clone();
+            let side_root = root.clone();
+            let side_branch = branch.clone();
+            let side_path = path.clone();
+            choices = choices.child(Button::new((id, index)).small().disabled(working).label(t(label)).on_click(move |_, _, cx| {
+              cx.stop_propagation();
+              let _ = side_view.update(cx, |this, cx| {
+                if !this.busy && this.connected && this.root == side_root && this.status.branch == side_branch && this.status.changes.iter().any(|change| change.path == side_path && change.conflict) {
+                  this.resolve_conflict_side(side_path.clone(), side, cx);
+                }
+              });
+            }));
+          }
+        } else {
+          choices = choices.child(div().text_sm().text_color(colors(Danger)).child(t("Merge inputs unavailable")));
+        }
+        let select_path = path.clone();
+        let file_selection = dialog_selection.clone();
+        let file_anchor = dialog_anchor.clone();
+        let row_path = path.clone();
+        let row_selection = dialog_selection.clone();
+        let row_anchor = dialog_anchor.clone();
+        let row_visible_paths = visible_paths.clone();
+        tree = tree.child(
+          div()
+            .id(("merge-conflict-row", index))
+            .flex()
+            .items_center()
+            .min_h(px(38.))
+            .px_3()
+            .gap_2()
+            .border_b_1()
+            .border_color(colors(Divider))
+            .when(file_selected, |row| row.bg(colors(Hover)))
+            .when(!working && inputs.is_some(), |row| {
+              row.cursor_pointer().hover(move |style| style.bg(colors(Hover))).on_click(move |event: &ClickEvent, window, _| {
+                let modifiers = event.modifiers();
+                let mut selected = row_selection.borrow_mut();
+                select_conflict_path(
+                  &mut selected,
+                  &mut row_anchor.borrow_mut(),
+                  row_path.clone(),
+                  row_visible_paths.as_slice(),
+                  modifiers.control || modifiers.platform,
+                  modifiers.shift,
+                );
+                window.refresh();
+              })
+            })
+            .child(
+              gpui_component::checkbox::Checkbox::new(("select-conflict-file", index))
+                .checked(file_selected)
+                .disabled(working || inputs.is_none())
+                .on_click(move |checked: &bool, window, cx| {
+                  cx.stop_propagation();
+                  let mut selected = file_selection.borrow_mut();
+                  if *checked {
+                    selected.insert(select_path.clone());
+                  } else {
+                    selected.remove(&select_path);
+                  }
+                  *file_anchor.borrow_mut() = Some(select_path.clone());
+                  window.refresh();
+                }),
+            )
+            .child(Icon::new(IconName::File).size(px(16.)).text_color(colors(MUTED)))
+            .child(
+              div()
+                .id(("merge-conflict-path", index))
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .text_ellipsis()
+                .child(display_path.clone())
+                .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(display_path.clone()).build(window, cx)),
+            )
+            .child(choices),
+        );
+      }
+      let close_view = view.clone();
+      let tree = div()
+        .relative()
+        .max_h(px(480.))
+        .overflow_hidden()
+        .border_1()
+        .border_color(colors(Divider))
+        .child(tree)
+        .child(gpui_component::scroll::Scrollbar::vertical(&dialog_scroll).mode(gpui_component::scroll::ScrollbarMode::Always));
       dialog
-        .title(t("Resolve binary merge"))
-        .footer(dialog_footer("resolve-binary-cancel", t("Cancel"), false))
-        .child(tf("Choose the file to overwrite {path}. Merge backups will be deleted after resolution.", &[("path", path.clone())]))
-        .child(choices)
+        .title(tf("{count} merge conflicts", &[("count", total_count.to_string())]))
+        .w(px(760.))
+        .footer(dialog_footer("close-merge-conflicts", t("Close"), false))
+        .child(t("Resolve all conflicted files. Completed files disappear from this tree."))
+        .child(filters)
+        .child(bulk_actions)
+        .child(tree)
+        .on_close(move |_, _, cx| {
+          let _ = close_view.update(cx, |this, cx| {
+            this.conflict_dialog_open = false;
+            cx.notify();
+          });
+        })
     });
   }
 
+  fn resolve_conflict_side(&mut self, path: String, side: backend::MergeSide, cx: &mut Context<Self>) {
+    self.resolve_conflict_sides(vec![path], side, cx);
+  }
+
+  fn resolve_conflict_sides(&mut self, mut paths: Vec<String>, side: backend::MergeSide, cx: &mut Context<Self>) {
+    paths.sort();
+    paths.dedup();
+    paths.retain(|path| self.status.changes.iter().any(|change| change.path == *path && change.conflict));
+    if paths.is_empty() {
+      return;
+    }
+    self.busy = true;
+    self.preview.invalidate();
+    let root = self.root.clone();
+    let task_paths = paths.clone();
+    let task = cx.background_executor().spawn(async move { backend::select_merge_sides(&root, &task_paths, side) });
+    cx.spawn(async move |this, cx| {
+      let result = task.await;
+      let _ = this.update(cx, |this, cx| {
+        this.busy = false;
+        match result {
+          Ok(()) => {
+            let commands = paths.iter().map(|path| vec!["branch".into(), "merge".into(), "resolve".into(), "--".into(), path.clone()]).collect();
+            this.command_batch(commands, "Resolve merge conflicts", false, true, cx);
+          }
+          Err(error) => {
+            this.notice = error;
+            this.error = true;
+          }
+        }
+        cx.notify();
+      });
+    })
+    .detach();
+    cx.notify();
+  }
+
+  pub(super) fn refresh_conflict_dialog_queue(&mut self) {
+    let conflicts = self
+      .status
+      .changes
+      .iter()
+      .filter(|change| change.conflict)
+      .map(|change| change.path.clone())
+      .collect::<std::collections::HashSet<_>>();
+    *self.conflict_dialog_entries.borrow_mut() = self
+      .status
+      .changes
+      .iter()
+      .filter(|change| change.conflict)
+      .map(|change| ConflictDialogEntry {
+        path: change.path.clone(),
+        inputs: backend::merge_inputs(&self.root, &change.path),
+      })
+      .collect();
+    self.conflict_dialog_selection.borrow_mut().retain(|path| conflicts.contains(path));
+    self.prompted_conflicts.retain(|path| conflicts.contains(path));
+    if self.conflict_dialog_open {
+      self.prompted_conflicts.extend(conflicts);
+      self.conflict_dialog_pending = false;
+    } else {
+      self.conflict_dialog_pending = conflicts.iter().any(|path| !self.prompted_conflicts.contains(path));
+    }
+  }
+
   pub(super) fn theme_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    let themes = gpui_component::ThemeRegistry::global(cx).sorted_themes();
-    let mut light = themes.iter().filter(|theme| !theme.mode.is_dark()).map(|theme| theme.name.to_string()).collect::<Vec<_>>();
-    let mut dark = themes.iter().filter(|theme| theme.mode.is_dark()).map(|theme| theme.name.to_string()).collect::<Vec<_>>();
-    light.sort_by_key(|name| name != theme::LIGHT_THEME);
-    dark.sort_by_key(|name| name != theme::DARK_THEME);
-    let show_dark = std::rc::Rc::new(std::cell::Cell::new(
-      themes
-        .iter()
-        .find(|theme| theme.name.as_ref() == self.settings.theme)
-        .map(|theme| theme.mode.is_dark())
-        .unwrap_or_else(|| gpui_component::Theme::global(cx).is_dark()),
-    ));
-    // The dialog is rendered while Lens is borrowed; keep its selection locally.
-    let selection = std::rc::Rc::new(std::cell::RefCell::new(self.settings.theme.clone()));
+    let current = self.settings.theme.clone();
     let view = cx.entity().downgrade();
-    window.open_dialog(cx, move |dialog, _, cx| {
-      let current = selection.borrow().clone();
-      let active_theme = gpui_component::Theme::global(cx).theme_name().to_string();
-      let system_selection = selection.clone();
-      let system_view = view.clone();
-      let dark_selected = show_dark.get();
+    window.open_dialog(cx, move |dialog, _, _| {
       let mut theme_list = div().flex().flex_col().gap_1();
-      for (index, name) in if dark_selected { &dark } else { &light }.iter().enumerate() {
+      for (index, name) in [theme::DEFAULT_THEME, theme::DARK_THEME, theme::LIGHT_THEME].into_iter().enumerate() {
         let theme_view = view.clone();
-        let theme_selection = selection.clone();
-        let theme = name.clone();
-        let label = if theme == theme::LIGHT_THEME || theme == theme::DARK_THEME {
-          tf("{theme} (Default)", &[("theme", theme.clone())])
-        } else {
-          theme.clone()
-        };
-        let label = if current == theme { format!("✓ {label}") } else { label };
+        let theme = name.to_string();
+        let label = if current == theme { format!("✓ {theme}") } else { theme.clone() };
         theme_list = theme_list.child(Button::new(("theme-option", index)).label(label).w_full().on_click(move |_, window, cx| {
           let selected_theme = theme.clone();
-          *theme_selection.borrow_mut() = selected_theme.clone();
           let _ = theme_view.update(cx, |this, cx| {
             this.settings.theme = theme.clone();
             this.save_settings();
@@ -196,56 +536,7 @@ impl Lens {
           defer_theme(selected_theme, window, cx);
         }));
       }
-      let light_mode = show_dark.clone();
-      let dark_mode = show_dark.clone();
-      let default_label = t("Default theme: LoreLens Light / Dark");
-      dialog
-        .title(t("Choose theme"))
-        .w(px(520.))
-        .footer(dialog_footer("theme-close", t("Close"), false))
-        .child(
-          Button::new("system-theme")
-            .label(if current == theme::DEFAULT_THEME { format!("✓ {default_label}") } else { default_label })
-            .w_full()
-            .on_click(move |_, window, cx| {
-              *system_selection.borrow_mut() = theme::DEFAULT_THEME.into();
-              let _ = system_view.update(cx, |this, cx| {
-                this.settings.theme = theme::DEFAULT_THEME.into();
-                this.save_settings();
-                cx.notify();
-              });
-              defer_theme(theme::DEFAULT_THEME, window, cx);
-            }),
-        )
-        .child(
-          div()
-            .text_sm()
-            .text_color(palette(cx)(MUTED))
-            .child(t("Automatically switches between light and dark to match your system settings.")),
-        )
-        .child(div().text_sm().child(tf("Current theme: {theme}", &[("theme", active_theme)])))
-        .child(
-          div()
-            .flex()
-            .gap_2()
-            .child(
-              Button::new("light-theme-mode")
-                .label(if dark_selected { t("Light") } else { format!("✓ {}", t("Light")) })
-                .on_click(move |_, window, _| {
-                  light_mode.set(false);
-                  window.refresh();
-                }),
-            )
-            .child(
-              Button::new("dark-theme-mode")
-                .label(if dark_selected { format!("✓ {}", t("Dark")) } else { t("Dark") })
-                .on_click(move |_, window, _| {
-                  dark_mode.set(true);
-                  window.refresh();
-                }),
-            ),
-        )
-        .child(div().h(px(460.)).min_h_0().overflow_y_scrollbar().pr_2().child(theme_list))
+      dialog.title(t("Choose theme")).w(px(360.)).footer(dialog_footer("theme-close", t("Close"), false)).child(theme_list)
     });
   }
 
@@ -260,10 +551,14 @@ impl Lens {
     let arguments = cx.new(|cx| TextInput::new("Arguments", cx));
     arguments.update(cx, |input, _| input.content = self.settings.custom_tool_arguments.clone().into());
     let presets = [
-      ("RustRover / IntelliJ", "idea", "merge {theirs} {yours} {base} {result}"),
+      ("RustRover / IntelliJ", "idea", "merge {yours} {theirs} {base} {result}"),
       ("P4Merge", "p4merge", "{base} {theirs} {yours} {result}"),
-      ("TortoiseGitMerge", "TortoiseGitMerge", "/base:{base} /mine:{yours} /theirs:{theirs} /merged:{result}"),
-      ("WinMerge", "WinMergeU", "/e /u /wl /wm /wr {base} {yours} {theirs} /o {result}"),
+      (
+        "TortoiseGitMerge",
+        "TortoiseGitMerge",
+        "/base:{base} /theirs:{theirs} /mine:{yours} /merged:{result} /saverequiredonconflicts",
+      ),
+      ("WinMerge", "WinMergeU", "/e /u /wl /wr /am {theirs} {base} {yours} /o {result}"),
     ];
     let view = cx.entity().downgrade();
     let validation = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
@@ -327,7 +622,7 @@ impl Lens {
           if external_tools::arguments(
             "custom",
             Some(&arguments),
-            false,
+            true,
             std::path::Path::new("base"),
             std::path::Path::new("theirs"),
             std::path::Path::new("yours"),
@@ -1652,7 +1947,9 @@ fn folder_change_paths(changes: &[Change], targets: &[(String, bool)], action: &
 
 #[cfg(test)]
 mod folder_scope_tests {
-  use super::{Change, folder_change_paths, valid_lore_remote};
+  use super::{
+    Change, ConflictDialogEntry, ConflictFilter, ConflictSort, conflict_file_name, conflict_matches_filter, folder_change_paths, select_conflict_path, sort_conflict_entries, valid_lore_remote,
+  };
 
   #[test]
   fn lore_remote_validation_requires_the_secure_lore_scheme() {
@@ -1692,5 +1989,74 @@ mod folder_scope_tests {
     let targets = vec![("folder".into(), true), ("folder/sub".into(), true), ("separate".into(), false)];
     assert_eq!(folder_change_paths(&changes, &targets, "reset", true).len(), 5);
     assert_eq!(folder_change_paths(&changes, &[("missing".into(), true)], "stage", true).len(), 0);
+  }
+
+  #[test]
+  fn conflict_rows_sort_by_file_name_or_extension_and_keep_full_paths() {
+    assert!(ConflictSort::default() == ConflictSort::FullPath);
+    let entries = || {
+      ["Folder/Zeta.txt", "Source/b.rs", "Plugins/A.RS", "README"]
+        .into_iter()
+        .map(|path| ConflictDialogEntry { path: path.into(), inputs: None })
+        .collect::<Vec<_>>()
+    };
+    let mut by_name = entries();
+    sort_conflict_entries(&mut by_name, ConflictSort::FileName);
+    assert_eq!(
+      by_name.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(),
+      ["Plugins/A.RS", "Source/b.rs", "README", "Folder/Zeta.txt"]
+    );
+
+    let mut by_extension = entries();
+    sort_conflict_entries(&mut by_extension, ConflictSort::Extension);
+    assert_eq!(
+      by_extension.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(),
+      ["README", "Plugins/A.RS", "Source/b.rs", "Folder/Zeta.txt"]
+    );
+
+    let mut by_full_path = entries();
+    sort_conflict_entries(&mut by_full_path, ConflictSort::FullPath);
+    assert_eq!(
+      by_full_path.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(),
+      ["Folder/Zeta.txt", "Plugins/A.RS", "README", "Source/b.rs"]
+    );
+    assert_eq!(conflict_file_name(r"Folder\Nested\asset.uasset"), "asset.uasset");
+  }
+
+  #[test]
+  fn conflict_rows_filter_by_file_name_and_extension_contains() {
+    let entry = ConflictDialogEntry {
+      path: "Content/Characters/HeroAsset.UASSET".into(),
+      inputs: None,
+    };
+    assert!(conflict_matches_filter(&entry, "hero", ConflictFilter::FileName));
+    assert!(conflict_matches_filter(&entry, "ASSET", ConflictFilter::FileName));
+    assert!(!conflict_matches_filter(&entry, "villain", ConflictFilter::FileName));
+    assert!(conflict_matches_filter(&entry, ".uasset", ConflictFilter::Extension));
+    assert!(conflict_matches_filter(&entry, "ass", ConflictFilter::Extension));
+    assert!(!conflict_matches_filter(&entry, "xlsx", ConflictFilter::Extension));
+  }
+
+  #[test]
+  fn conflict_rows_support_single_ctrl_and_shift_selection() {
+    let visible = ["a", "b", "c", "d"].map(String::from);
+    let mut selected = std::collections::HashSet::new();
+    let mut anchor = None;
+
+    select_conflict_path(&mut selected, &mut anchor, "b".into(), &visible, false, false);
+    assert_eq!(selected, ["b".into()].into_iter().collect());
+
+    select_conflict_path(&mut selected, &mut anchor, "d".into(), &visible, true, false);
+    assert_eq!(selected, ["b".into(), "d".into()].into_iter().collect());
+
+    select_conflict_path(&mut selected, &mut anchor, "b".into(), &visible, true, false);
+    assert_eq!(selected, ["d".into()].into_iter().collect());
+
+    select_conflict_path(&mut selected, &mut anchor, "d".into(), &visible, false, false);
+    select_conflict_path(&mut selected, &mut anchor, "b".into(), &visible, false, true);
+    assert_eq!(selected, ["b".into(), "c".into(), "d".into()].into_iter().collect());
+
+    select_conflict_path(&mut selected, &mut anchor, "a".into(), &visible, true, true);
+    assert_eq!(selected, ["a".into(), "b".into(), "c".into(), "d".into()].into_iter().collect());
   }
 }

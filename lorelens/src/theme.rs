@@ -1,9 +1,18 @@
 use gpui::{App, Hsla, Window};
-use gpui_component::{Theme, ThemeMode, ThemeRegistry};
+use gpui_component::{Theme, ThemeRegistry};
 
 pub(crate) const LIGHT_THEME: &str = "LoreLens Light";
 pub(crate) const DARK_THEME: &str = "LoreLens Dark";
 pub(crate) const DEFAULT_THEME: &str = "System";
+
+pub(crate) fn normalize_theme(value: &str) -> &'static str {
+  match value {
+    DEFAULT_THEME => DEFAULT_THEME,
+    LIGHT_THEME | "Light" => LIGHT_THEME,
+    DARK_THEME | "Dark" => DARK_THEME,
+    _ => DEFAULT_THEME,
+  }
+}
 
 #[derive(Clone, Copy)]
 #[allow(clippy::upper_case_acronyms)]
@@ -58,20 +67,13 @@ pub(crate) fn selected_row_palette(cx: &App, window_active: bool) -> (Hsla, Hsla
 }
 
 pub(super) fn apply_theme(value: &str, window: Option<&mut Window>, cx: &mut App) {
-  match value {
-    "System" => {
+  match normalize_theme(value) {
+    DEFAULT_THEME => {
       reset_default_themes(cx);
       Theme::sync_system_appearance(window, cx);
     }
-    "Light" => {
-      reset_default_themes(cx);
-      Theme::change(ThemeMode::Light, window, cx);
-    }
-    "Dark" => {
-      reset_default_themes(cx);
-      Theme::change(ThemeMode::Dark, window, cx);
-    }
-    name => {
+    LIGHT_THEME | DARK_THEME => {
+      let name = normalize_theme(value);
       let Some(config) = ThemeRegistry::global(cx).themes().get(name).cloned() else {
         reset_default_themes(cx);
         Theme::sync_system_appearance(window, cx);
@@ -85,6 +87,7 @@ pub(super) fn apply_theme(value: &str, window: Option<&mut Window>, cx: &mut App
       }
       Theme::change(mode, window, cx);
     }
+    _ => unreachable!("theme normalization only returns supported values"),
   }
 }
 
@@ -120,6 +123,14 @@ mod tests {
     }
     assert!(names.contains(super::LIGHT_THEME), "the light default theme must be bundled");
     assert!(names.contains(super::DARK_THEME), "the dark default theme must be bundled");
+    assert_eq!(names.len(), 2, "only the LoreLens light and dark themes must be bundled");
     assert_eq!(super::DEFAULT_THEME, "System", "the default must follow the system appearance");
+  }
+
+  #[test]
+  fn normalizes_legacy_and_unsupported_theme_choices() {
+    assert_eq!(super::normalize_theme("Light"), super::LIGHT_THEME);
+    assert_eq!(super::normalize_theme("Dark"), super::DARK_THEME);
+    assert_eq!(super::normalize_theme("Tokyo Night"), super::DEFAULT_THEME);
   }
 }

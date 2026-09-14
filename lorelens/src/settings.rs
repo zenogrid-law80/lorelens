@@ -189,7 +189,7 @@ impl Settings {
       bookmarks: Self::normalized_bookmarks(bookmarks),
       cli,
       language: crate::i18n::normalize(data["language"].as_str().unwrap_or("en-US")).into(),
-      theme: data["theme"].as_str().unwrap_or(crate::theme::DEFAULT_THEME).to_string(),
+      theme: crate::theme::normalize_theme(data["theme"].as_str().unwrap_or(crate::theme::DEFAULT_THEME)).into(),
       show_command_log: data["show_command_log"].as_bool().unwrap_or(true),
       auto_refresh: data["auto_refresh"].as_bool().unwrap_or(true),
       text_line_ending: match data["text_line_ending"].as_str().unwrap_or("LF") {
@@ -550,7 +550,7 @@ mod tests {
     settings.save(&path).unwrap();
     let mut restarted = Settings::load(&path).unwrap();
     assert_eq!(restarted.login_urls, settings.login_urls);
-    restarted.theme = "Light".into();
+    restarted.theme = crate::theme::LIGHT_THEME.into();
     restarted.save(&path).unwrap();
     assert_eq!(Settings::load(&path).unwrap().login_urls, settings.login_urls);
     fs::write(&path, "{}").unwrap();
@@ -566,7 +566,7 @@ mod tests {
     settings.remember(&root);
     settings.remember(&root.join("src"));
     settings.cli = Some(root.join("한글 CLI.exe"));
-    settings.theme = "Light".into();
+    settings.theme = crate::theme::LIGHT_THEME.into();
     settings.language = "ko-KR".into();
     settings.external_tool = "p4merge".into();
     settings.tool_paths.insert("rider".into(), root.join("한글 tools/rider64.exe"));
@@ -581,7 +581,7 @@ mod tests {
     assert_eq!(restored.recent.len(), 2);
     assert_eq!(restored.restore(), Some(root.join("src")));
     assert_eq!(restored.cli, settings.cli);
-    assert_eq!(restored.theme, "Light");
+    assert_eq!(restored.theme, crate::theme::LIGHT_THEME);
     assert_eq!(restored.language, "ko-KR");
     assert_eq!(restored.external_tool, "p4merge");
     assert_eq!(restored.tool_paths, settings.tool_paths);
@@ -606,7 +606,7 @@ mod tests {
     let mut restarted = Settings::load(&path).unwrap();
     assert_eq!(restarted.tool_paths, expected);
     assert_eq!(restarted.external_tool, "rider");
-    restarted.theme = "Light".into();
+    restarted.theme = crate::theme::LIGHT_THEME.into();
     restarted.save(&path).unwrap();
     drop(restarted);
     assert_eq!(Settings::load(&path).unwrap().tool_paths, expected);

@@ -180,6 +180,43 @@ impl Lens {
     self.refresh(cx);
   }
 
+  fn sync_remote_revision_dialog(&mut self, revision: String, number: u64, window: &mut Window, cx: &mut Context<Self>) {
+    if self.busy || !self.connected || self.remote_history.selected.as_deref() != Some(&revision) {
+      return;
+    }
+    let root = self.root.clone();
+    let target = self.remote_history.target.clone();
+    let view = cx.entity().downgrade();
+    window.open_dialog(cx, move |dialog, _, _| {
+      let revision = revision.clone();
+      let root = root.clone();
+      let target = target.clone();
+      let view = view.clone();
+      dialog
+        .title(t("Sync selected revision"))
+        .footer(dialog_footer("sync-selected-revision", t("Sync"), true))
+        .child(tf(
+          "Sync this workspace to r{revision}? LoreLens will not use --reset or --force. The selected revision may change the current branch and update local files.",
+          &[("revision", number.to_string())],
+        ))
+        .on_ok(move |_, window, cx| {
+          view
+            .update(cx, |this, cx| {
+              let available = this.remote_history.result.as_ref().is_ok_and(|history| history.commits.iter().any(|commit| commit.hash == revision));
+              if this.busy || !this.connected || this.root != root || this.remote_history.target != target || this.remote_history.selected.as_deref() != Some(&revision) || !available {
+                this.notice = t("Selected revision is no longer available. Refresh and try again.");
+                this.error = true;
+                window.refresh();
+                return false;
+              }
+              this.command(vec!["sync".into(), revision.clone()], "Sync selected revision", false, true, cx);
+              true
+            })
+            .unwrap_or(false)
+        })
+    });
+  }
+
   fn select_remote_commit(&mut self, hash: String, cx: &mut Context<Self>) {
     if !self.remote_history.result.as_ref().is_ok_and(|history| history.commits.iter().any(|commit| commit.hash == hash)) {
       return;
@@ -485,6 +522,8 @@ impl Lens {
     let index = self.remote_history.rows[row];
     let commit = &history.commits[index];
     let hash = commit.hash.clone();
+    let select_hash = hash.clone();
+    let revision = commit.number;
     let selected = self.remote_history.selected.as_ref() == Some(&hash);
     let (selected_background, selected_foreground) = selected_row_palette(cx, window_active);
     div()
@@ -555,13 +594,32 @@ impl Lens {
           .text_color(if selected { selected_foreground } else { rgb(MUTED) })
           .child(commit_date(commit.timestamp)),
       )
-      .on_click(cx.listener(move |this, _, _, cx| this.select_remote_commit(hash.clone(), cx)))
+      .on_click(cx.listener(move |this, _, _, cx| this.select_remote_commit(select_hash.clone(), cx)))
+      .context_menu({
+        let view = cx.entity().downgrade();
+        let root = self.root.clone();
+        move |menu, _, cx| {
+          let enabled = view.upgrade().is_some_and(|entity| {
+            let this = entity.read(cx);
+            !this.busy && this.connected && this.root == root && this.remote_history.selected.as_deref() == Some(&hash)
+          });
+          let view = view.clone();
+          let hash = hash.clone();
+          menu.item(
+            PopupMenuItem::new(tf("Sync to r{revision}", &[("revision", revision.to_string())]))
+              .disabled(!enabled)
+              .on_click(move |_, window, cx| {
+                let _ = view.update(cx, |this, cx| this.sync_remote_revision_dialog(hash.clone(), revision, window, cx));
+              }),
+          )
+        }
+      })
   }
 
   fn remote_revision_details(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let rgb = palette(cx);
     let selected = self.remote_history.selected_commit().filter(|_| self.connected);
-    let mut files = div().id("remote-revision-files").flex_1().min_h_0().overflow_y_scroll().p_2();
+    let mut files = div().id("remote-revision-files").size_full().min_h_0().overflow_y_scroll().p_2();
     if selected.is_none() {
       files = files.child(div().p_2().text_color(rgb(MUTED)).child(t("Select a commit to view details.")));
     } else if self.remote_history.files_loading {
@@ -676,7 +734,7 @@ impl Lens {
         None => {}
       }
     }
-    let mut details = div().id("remote-revision-message").h(px(135.)).flex_shrink_0().overflow_y_scroll().p_3().flex().flex_col().gap_2();
+    let mut details = div().id("remote-revision-message").size_full().min_h_0().overflow_y_scroll().p_3().flex().flex_col().gap_2();
     if let Some(commit) = selected {
       let author = if commit.author.is_empty() { "—" } else { &commit.author };
       let parents = commit.parents.iter().map(|parent| parent.chars().take(10).collect::<String>()).collect::<Vec<_>>().join(", ");
@@ -690,7 +748,7 @@ impl Lens {
     }
     let can_compare = !self.busy && self.connected && self.remote_history.comparison().is_some();
     let file_panel = div()
-      .flex_1()
+      .size_full()
       .min_w_0()
       .min_h_0()
       .flex()
@@ -753,7 +811,9 @@ impl Lens {
           .child(t("M files: first parent → selected commit")),
       )
       .child(files);
-    div().size_full().min_h_0().flex().flex_col().child(file_panel).child(details.border_t_1().border_color(rgb(BORDER)))
+    v_resizable("remote-revision-detail-split")
+      .child(resizable_panel().size_range(px(120.)..Pixels::MAX).child(file_panel))
+      .child(resizable_panel().size(px(135.)).size_range(px(90.)..px(360.)).child(details.border_t_1().border_color(rgb(BORDER))))
   }
 
   pub(super) fn render_remote_history(&mut self, window_active: bool, cx: &mut Context<Self>) -> impl IntoElement {
@@ -877,23 +937,10 @@ impl Lens {
             .child(gpui_component::scroll::Scrollbar::vertical(&self.remote_history.scroll).mode(gpui_component::scroll::ScrollbarMode::Always)),
         )
       });
-    div()
-      .flex_1()
-      .min_h_0()
-      .min_w_0()
-      .text_size(px(12.))
-      .flex()
-      .child(div().w(px(170.)).h_full().flex_shrink_0().border_r_1().border_color(rgb(BORDER)).child(self.remote_branch_tree(cx)))
-      .child(div().flex_1().min_w_0().h_full().child(list))
-      .child(
-        div()
-          .w(px(280.))
-          .h_full()
-          .flex_shrink_0()
-          .border_l_1()
-          .border_color(rgb(BORDER))
-          .child(self.remote_revision_details(cx)),
-      )
+    h_resizable("remote-history-pane-split")
+      .child(resizable_panel().size(px(170.)).size_range(px(140.)..px(320.)).child(self.remote_branch_tree(cx)))
+      .child(resizable_panel().size_range(px(360.)..Pixels::MAX).child(list))
+      .child(resizable_panel().size(px(280.)).size_range(px(220.)..px(520.)).child(self.remote_revision_details(cx)))
   }
 }
 

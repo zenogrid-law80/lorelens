@@ -107,8 +107,23 @@ enum Tab {
 
 enum DiffRetry {
   Working { root: PathBuf, path: String },
+  Merge { root: PathBuf, paths: Vec<String> },
   History { root: PathBuf, path: String, older: String, newer: String },
   RemoteHistory { root: PathBuf, comparison: backend::RevisionComparison },
+}
+
+#[derive(Clone)]
+struct ConflictDialogEntry {
+  path: String,
+  inputs: Option<backend::MergeInputs>,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum ConflictSort {
+  FileName,
+  Extension,
+  #[default]
+  FullPath,
 }
 
 struct Lens {
@@ -157,6 +172,13 @@ struct Lens {
   startup_login_pending: bool,
   #[cfg(windows)]
   cli_install_pending: bool,
+  conflict_dialog_pending: bool,
+  conflict_dialog_open: bool,
+  conflict_dialog_entries: std::rc::Rc<std::cell::RefCell<Vec<ConflictDialogEntry>>>,
+  conflict_dialog_selection: std::rc::Rc<std::cell::RefCell<std::collections::HashSet<String>>>,
+  conflict_dialog_working: std::rc::Rc<std::cell::Cell<bool>>,
+  conflict_dialog_sort: std::rc::Rc<std::cell::Cell<ConflictSort>>,
+  prompted_conflicts: std::collections::HashSet<String>,
   refresh_pending: bool,
   pending_refresh_silent: bool,
   next_refresh: std::time::Instant,
@@ -244,6 +266,7 @@ impl Lens {
                 if this.settings.external_tool == tool {
                   match retry {
                     Some(DiffRetry::Working { root, path }) if this.root == root => this.external_diff(path, cx),
+                    Some(DiffRetry::Merge { root, paths }) if this.root == root => this.external_merge(paths, cx),
                     Some(DiffRetry::History { root, path, older, newer }) if this.root == root && this.file_history.matches_pair(&path, &older, &newer) => this.diff_selected_history(cx),
                     Some(DiffRetry::RemoteHistory { root, comparison }) if this.root == root && this.remote_history.matches_comparison(&comparison) => this.diff_remote_file(cx),
                     _ => {}
@@ -268,14 +291,14 @@ impl Lens {
     if self.busy || !self.connected || self.root.join(&path).is_dir() {
       return;
     }
+    if self.status.changes.iter().any(|change| change.path == path && change.conflict) {
+      self.external_merge(vec![path], cx);
+      return;
+    }
     let root = self.root.clone();
     let cli = self.cli.clone();
     let identity = self.settings.identity.clone();
     let revision = format!("{}@{}", self.status.branch, self.status.revision);
-    let merge = self.status.changes.iter().any(|change| change.path == path && change.conflict);
-    let merge_path = path.clone();
-    let merge_root = root.clone();
-    let merge_branch = self.status.branch.clone();
     let tool = self.settings.external_tool.clone();
     let custom_arguments = (tool == "custom").then(|| self.settings.custom_tool_arguments.clone());
     let configured = if tool == "custom" {
@@ -290,22 +313,8 @@ impl Lens {
     };
     self.preview.invalidate();
     self.busy = true;
-    self.notice = tf(
-      if merge { "Opening {tool} merge for {path}…" } else { "Opening {tool} diff for {path}…" },
-      &[("tool", display_name), ("path", path.to_string())],
-    );
+    self.notice = tf("Opening {tool} diff for {path}…", &[("tool", display_name), ("path", path.to_string())]);
     let task = cx.background_executor().spawn(async move {
-      if merge {
-        return external_tools::merge(
-          &root,
-          &path,
-          external_tools::Tool {
-            name: &tool,
-            custom_arguments: custom_arguments.as_deref(),
-            executable: &executable,
-          },
-        );
-      }
       external_tools::diff(
         &cli,
         &root,
@@ -326,22 +335,109 @@ impl Lens {
         this.silent_refresh = false;
         match result {
           Ok(()) => {
-            if merge && this.root == merge_root && this.status.branch == merge_branch {
-              this.command(
-                vec!["branch".into(), "merge".into(), "resolve".into(), "--".into(), merge_path],
-                "Resolve merge conflict",
-                false,
-                true,
-                cx,
-              );
-              return;
-            }
             this.notice = "External diff opened".into();
             this.error = false;
           }
           Err(error) => {
             this.notice = error;
             this.error = true;
+          }
+        }
+        cx.notify();
+      });
+    })
+    .detach();
+    cx.notify();
+  }
+
+  fn external_merge(&mut self, mut paths: Vec<String>, cx: &mut Context<Self>) {
+    if self.busy || !self.connected {
+      return;
+    }
+    paths.sort();
+    paths.dedup();
+    paths.retain(|path| self.status.changes.iter().any(|change| change.path == *path && change.conflict) && !self.root.join(path).is_dir());
+    if paths.is_empty() {
+      return;
+    }
+    if paths.iter().any(|path| backend::merge_inputs(&self.root, path) != Some(backend::MergeInputs::ThreeWay)) {
+      self.notice = t("Merge is available only for three-way conflicts.");
+      self.error = true;
+      cx.notify();
+      return;
+    }
+
+    let root = self.root.clone();
+    let branch = self.status.branch.clone();
+    let tool = self.settings.external_tool.clone();
+    let custom_arguments = (tool == "custom").then(|| self.settings.custom_tool_arguments.clone());
+    let configured = if tool == "custom" {
+      Some(&self.settings.custom_tool_path)
+    } else {
+      self.settings.tool_paths.get(&tool)
+    };
+    let executable = external_tools::resolve(&tool, configured);
+    let retry_tool = tool.clone();
+    let cli = self.cli.clone();
+    let identity = self.settings.identity.clone();
+
+    self.preview.invalidate();
+    self.busy = true;
+    self.notice = tf("Merging {count} files…", &[("count", paths.len().to_string())]);
+    let task_paths = paths.clone();
+    let task_root = root.clone();
+    let task = cx.background_executor().spawn(async move {
+      let mut pending = Vec::new();
+      for path in task_paths {
+        if !backend::try_auto_merge(&task_root, &path)? {
+          let Some(executable) = executable.as_ref() else {
+            pending.push(path);
+            continue;
+          };
+          external_tools::merge(
+            &task_root,
+            &path,
+            external_tools::Tool {
+              name: &tool,
+              custom_arguments: custom_arguments.as_deref(),
+              executable,
+            },
+          )?;
+        }
+        backend::run_as(
+          &cli,
+          &task_root,
+          &["branch".into(), "merge".into(), "resolve".into(), "--".into(), path.clone()],
+          false,
+          identity.as_deref(),
+        )?;
+        backend::cleanup_resolved_merge(&cli, &task_root, &path, identity.as_deref())?;
+      }
+      Ok::<Vec<String>, String>(pending)
+    });
+    cx.spawn(async move |this, cx| {
+      let result = task.await;
+      let _ = this.update(cx, |this, cx| {
+        this.busy = false;
+        this.silent_refresh = false;
+        match result {
+          Ok(pending) if this.root == root && this.status.branch == branch => {
+            if pending.is_empty() {
+              this.refresh(cx);
+            } else {
+              this.choose_tool(retry_tool, Some(DiffRetry::Merge { root, paths: pending }), cx);
+              cx.notify();
+            }
+            return;
+          }
+          Ok(_) => {
+            this.notice = t("Merge inputs have changed. Try resolving again.");
+            this.error = true;
+          }
+          Err(error) => {
+            this.notice = error;
+            this.error = true;
+            this.refresh_pending = true;
           }
         }
         cx.notify();
@@ -383,6 +479,13 @@ impl Lens {
             startup_login_pending: false,
             #[cfg(windows)]
             cli_install_pending: false,
+            conflict_dialog_pending: false,
+            conflict_dialog_open: false,
+            conflict_dialog_entries: Default::default(),
+            conflict_dialog_selection: Default::default(),
+            conflict_dialog_working: Default::default(),
+            conflict_dialog_sort: Default::default(),
+            prompted_conflicts: Default::default(),
             refresh_pending: false,
             pending_refresh_silent: false,
             next_refresh: std::time::Instant::now() + std::time::Duration::from_secs(30),
@@ -458,6 +561,12 @@ impl Lens {
     self.directory = self.root.clone();
     self.folder_to_select = None;
     self.refresh_pending = false;
+    self.conflict_dialog_pending = false;
+    self.conflict_dialog_open = false;
+    self.conflict_dialog_entries.borrow_mut().clear();
+    self.conflict_dialog_selection.borrow_mut().clear();
+    self.conflict_dialog_working.set(false);
+    self.prompted_conflicts.clear();
     self.status = Status::default();
     self.locked_paths.clear();
     self.connected = false;
@@ -1647,6 +1756,7 @@ fn main() {
         let view = cx.new(|cx| Lens::new(root, settings, settings_error, cx));
         view.update(cx, |this, cx| {
           cx.observe_in(&cx.entity(), window, |this, _, window, cx| {
+            this.conflict_dialog_working.set(this.busy);
             #[cfg(windows)]
             if this.cli_install_pending && !this.busy {
               this.cli_install_pending = false;
@@ -1656,6 +1766,24 @@ fn main() {
             if this.startup_login_pending && !this.busy {
               this.startup_login_pending = false;
               this.login_dialog(window, cx);
+              return;
+            }
+            let has_conflicts = this.status.changes.iter().any(|change| change.conflict);
+            if this.conflict_dialog_open && !has_conflicts {
+              this.conflict_dialog_open = false;
+              if window.has_active_dialog(cx) {
+                // Closing invokes the dialog's on_close callback. Defer it until
+                // this Lens update has released its borrow to avoid reentrancy.
+                window.defer(cx, |window, cx| {
+                  if window.has_active_dialog(cx) {
+                    window.close_dialog(cx);
+                  }
+                });
+              }
+              return;
+            }
+            if !this.busy && this.conflict_dialog_pending && !window.has_active_dialog(cx) {
+              this.merge_conflicts_dialog(window, cx);
             }
           })
           .detach();

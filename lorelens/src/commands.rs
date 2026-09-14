@@ -95,7 +95,9 @@ mod tests {
       assert_eq!(CommandKind::from_args(&args), expected);
     }
     assert!(CommandKind::Account.is_authentication());
+    assert!(CommandKind::Sync.changes_worktree());
     assert!(CommandKind::SwitchBranch.changes_worktree());
+    assert!(CommandKind::Merge.changes_worktree());
     assert!(!CommandKind::ListBranches.changes_worktree());
   }
 
@@ -340,6 +342,7 @@ impl Lens {
                 Ok(state) => {
                   this.status = state;
                   this.connected = true;
+                  this.refresh_conflict_dialog_queue();
                   if !silent_refresh {
                     this.notice = tf("Status refreshed · {count} pending files", &[("count", this.status.changes.len().to_string())]);
                   }
@@ -507,7 +510,7 @@ impl Lens {
               e.clone()
             };
             this.log(e);
-            if resets_files || matches!(kind, CommandKind::ArchiveBranch | CommandKind::SwitchBranch | CommandKind::Merge | CommandKind::Obliterate) {
+            if resets_files || kind.changes_worktree() || matches!(kind, CommandKind::ArchiveBranch | CommandKind::Obliterate) {
               this.refresh_pending = true;
               this.pending_refresh_silent = false;
             }
