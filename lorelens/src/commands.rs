@@ -185,7 +185,7 @@ impl Lens {
     let text_encoding = self.settings.text_encoding.clone();
     let text_extensions = self.settings.text_extensions.clone();
     let remote_history_limit = self.remote_history.limit;
-    let remote_history_branch = self.remote_history.branch.clone();
+    let history_target = self.remote_history.target.clone();
     let kind = CommandKind::from_args(&args);
     let resets_files = commands.iter().any(|args| args.first().is_some_and(|arg| arg == "reset"));
     let authentication = kind.is_authentication();
@@ -275,9 +275,10 @@ impl Lens {
           .and_then(|output| backend::pending_pull(&cli, &root, output, identity.as_deref()))
       });
       let remote_history = status.then(|| {
-        result.as_ref().map_err(|error| error.clone()).and_then(|output| match remote_history_branch.as_deref() {
-          Some(branch) => backend::remote_branch_history(&cli, &root, branch, remote_history_limit, identity.as_deref()),
-          None => backend::remote_history(&cli, &root, output, remote_history_limit, identity.as_deref()),
+        result.as_ref().map_err(|error| error.clone()).and_then(|output| match &history_target {
+          remote_history::HistoryTarget::Head => backend::local_history(&cli, &root, output, remote_history_limit, identity.as_deref()),
+          remote_history::HistoryTarget::Local(branch) => backend::local_branch_history(&cli, &root, branch, remote_history_limit, identity.as_deref()),
+          remote_history::HistoryTarget::Remote(branch) => backend::remote_branch_history(&cli, &root, branch, remote_history_limit, identity.as_deref()),
         })
       });
       let locks = status.then(|| {

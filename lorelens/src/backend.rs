@@ -27,7 +27,8 @@ pub fn list_tree(root: &Path, expanded: &std::collections::HashSet<PathBuf>) -> 
 pub use cli::{find_cli, run_as, run_branch_switch_skipping_unavailable, run_global};
 pub use deduplicate::{deduplicate_commands, deduplicate_files, duplicate_change_paths, duplicate_local_files};
 pub use history::{
-  FileRevision, RemoteCommit, RemoteHistory, RevisionComparison, RevisionFile, file_history, remote_branch_history, remote_history, revision_files, revision_patch, save_revision_patch,
+  FileRevision, RemoteCommit, RemoteHistory, RevisionComparison, RevisionFile, file_history, local_branch_history, local_history, remote_branch_history, revision_files, revision_patch,
+  save_revision_patch,
 };
 pub use obliterate::obliterate_args;
 pub use reset::reset_commands;

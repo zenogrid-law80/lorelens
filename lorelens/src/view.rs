@@ -210,7 +210,7 @@ impl Render for Lens {
           .border_color(rgb(BORDER))
           .bg(rgb(PANEL))
           .children(
-            [("command-log-tab", "Command log", false), ("remote-history-tab", "Remote history", true)]
+            [("command-log-tab", "Command log", false), ("remote-history-tab", "History", true)]
               .into_iter()
               .map(|(id, label, remote)| {
                 let active = self.remote_history.visible == remote;

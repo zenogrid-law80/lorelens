@@ -213,6 +213,14 @@ pub fn remote_branch_history(cli: &Path, root: &Path, branch: &str, limit: usize
   })
 }
 
+pub fn local_branch_history(cli: &Path, root: &Path, branch: &str, limit: usize, identity: Option<&str>) -> Result<RemoteHistory, String> {
+  let args = vec!["history".into(), limit.clamp(1, 10000).to_string(), "--branch".into(), branch.into()];
+  Ok(RemoteHistory {
+    branch: branch.into(),
+    commits: parse_remote_commits(&run_as(cli, root, &args, true, identity)?)?,
+  })
+}
+
 pub fn revision_files(cli: &Path, root: &Path, revision: &str, identity: Option<&str>) -> Result<Vec<RevisionFile>, String> {
   if !valid_revision(revision) {
     return Err("Invalid revision hash".into());
@@ -242,9 +250,7 @@ fn parse_revision_files(output: &str, revision: &str) -> Result<Vec<RevisionFile
   Ok(files)
 }
 
-// Resolve the remote tip from status rather than the local branch head, which
-// can include commits that have not been pushed yet.
-fn remote_history_target(output: &str) -> Result<(String, Option<String>), String> {
+fn local_history_target(output: &str) -> Result<(String, String), String> {
   let events = output
     .lines()
     .filter(|line| !line.trim().is_empty())
@@ -258,31 +264,17 @@ fn remote_history_target(output: &str) -> Result<(String, Option<String>), Strin
   }
   let data = &events.iter().find(|event| event["tagName"] == "repositoryStatusRevision").ok_or("Missing repository status")?["data"];
   let branch = data["branchName"].as_str().filter(|name| !name.is_empty()).ok_or("Missing branch name")?.to_owned();
-  if data["remoteAuthorized"] != true && data["remoteAuthorized"] != 1 {
-    return Err("Remote status unavailable; check authentication.".into());
-  }
-  if data["remoteBranchExist"] == false || data["remoteBranchExist"] == 0 {
-    return Ok((branch, None));
-  }
-  if data["remoteBranchExist"] != true && data["remoteBranchExist"] != 1 {
-    return Err("Remote branch status unavailable.".into());
-  }
-  let revision = data["revisionRemote"]
-    .as_str()
-    .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()) && hash.bytes().any(|byte| byte != b'0'))
-    .ok_or("Missing remote revision")?;
-  Ok((branch, Some(revision.into())))
+  let revision = data["revisionLocal"].as_str().filter(|hash| valid_revision(hash)).ok_or("Missing local revision")?.to_owned();
+  Ok((branch, revision))
 }
 
-pub fn remote_history(cli: &Path, root: &Path, status: &str, limit: usize, identity: Option<&str>) -> Result<RemoteHistory, String> {
-  let (branch, revision) = remote_history_target(status)?;
-  let commits = if let Some(revision) = revision {
-    let args = vec!["history".into(), limit.clamp(1, 10000).to_string(), "--revision".into(), revision];
-    parse_remote_commits(&run_as(cli, root, &args, true, identity)?)?
-  } else {
-    Vec::new()
-  };
-  Ok(RemoteHistory { branch, commits })
+pub fn local_history(cli: &Path, root: &Path, status: &str, limit: usize, identity: Option<&str>) -> Result<RemoteHistory, String> {
+  let (branch, revision) = local_history_target(status)?;
+  let args = vec!["history".into(), limit.clamp(1, 10000).to_string(), "--revision".into(), revision];
+  Ok(RemoteHistory {
+    branch,
+    commits: parse_remote_commits(&run_as(cli, root, &args, true, identity)?)?,
+  })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -529,7 +521,7 @@ mod tests {
     assert!(revision_files(Path::new("missing-cli"), Path::new("."), "--malformed", None).is_err());
   }
 
-  fn remote_status(data: Value) -> String {
+  fn repository_status(data: Value) -> String {
     format!(
       "{}\n{}",
       serde_json::json!({"tagName": "repositoryStatusRevision", "data": data}),
@@ -538,35 +530,20 @@ mod tests {
   }
 
   #[test]
-  fn remote_history_starts_at_remote_tip_even_when_local_is_ahead_or_diverged() {
-    let remote = "b".repeat(64);
-    for local in ["a".repeat(64), remote.clone()] {
-      for flag in [serde_json::json!(true), serde_json::json!(1)] {
-        let output = remote_status(serde_json::json!({
-          "branchName": "한글 branch", "remoteAuthorized": flag, "remoteBranchExist": flag,
-          "revisionLocal": local, "revisionRemote": remote
-        }));
-        assert_eq!(remote_history_target(&output).unwrap(), ("한글 branch".into(), Some(remote.clone())));
-      }
+  fn local_history_starts_at_the_checked_out_local_tip() {
+    let local = "a".repeat(64);
+    let output = repository_status(serde_json::json!({
+      "branchName": "main", "revisionLocal": local, "remoteAuthorized": false,
+      "remoteBranchExist": true, "revisionRemote": "b".repeat(64)
+    }));
+    assert_eq!(local_history_target(&output).unwrap(), ("main".into(), local));
+    for data in [serde_json::json!({"branchName": "main"}), serde_json::json!({"branchName": "main", "revisionLocal": "0".repeat(64)})] {
+      assert!(local_history_target(&repository_status(data)).is_err());
     }
-  }
-
-  #[test]
-  fn remote_history_distinguishes_unpushed_branches_from_unavailable_status() {
-    let output = remote_status(serde_json::json!({"branchName": "new", "remoteAuthorized": true, "remoteBranchExist": false}));
-    assert!(remote_history(Path::new("missing-cli"), Path::new("."), &output, 100, None).unwrap().commits.is_empty());
-    for data in [
-      serde_json::json!({"branchName": "main", "remoteAuthorized": false}),
-      serde_json::json!({"branchName": "main", "remoteAuthorized": true}),
-      serde_json::json!({"branchName": "main", "remoteAuthorized": true, "remoteBranchExist": true}),
-      serde_json::json!({"branchName": "main", "remoteAuthorized": true, "remoteBranchExist": true, "revisionRemote": "0".repeat(64)}),
-    ] {
-      assert!(remote_history_target(&remote_status(data)).is_err());
-    }
-    assert!(remote_history_target("").is_err());
-    assert!(remote_history_target("invalid json").is_err());
-    assert!(remote_history_target(output.lines().next().unwrap()).is_err());
-    assert!(remote_history_target(&output.replace("\"status\":0", "\"status\":1")).is_err());
+    assert!(local_history_target("").is_err());
+    assert!(local_history_target("invalid json").is_err());
+    assert!(local_history_target(output.lines().next().unwrap()).is_err());
+    assert!(local_history_target(&output.replace("\"status\":0", "\"status\":1")).is_err());
   }
 
   #[test]

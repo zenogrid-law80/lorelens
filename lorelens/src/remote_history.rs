@@ -12,12 +12,19 @@ fn remote_history_page_range(page: usize, total: usize) -> std::ops::Range<usize
   start..start.saturating_add(REMOTE_HISTORY_PAGE_SIZE).min(total)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum HistoryTarget {
+  Head,
+  Local(String),
+  Remote(String),
+}
+
 pub(super) struct RemoteHistoryState {
   pub visible: bool,
   pub limit: usize,
   page: usize,
-  // None follows the checked-out branch; selecting a remote never checks it out.
-  pub branch: Option<String>,
+  // Browsing another branch never checks it out.
+  pub target: HistoryTarget,
   pub result: Result<backend::RemoteHistory, String>,
   filter: Entity<TextInput>,
   branch_filter: Entity<TextInput>,
@@ -26,6 +33,7 @@ pub(super) struct RemoteHistoryState {
   files: Option<Result<Vec<backend::RevisionFile>, String>>,
   files_loading: bool,
   selected_file: Option<String>,
+  local_expanded: bool,
   remote_expanded: bool,
   collapsed_folders: std::collections::HashSet<String>,
   scroll: UniformListScrollHandle,
@@ -45,8 +53,8 @@ impl RemoteHistoryState {
       visible: false,
       limit: remote_history_limit(0),
       page: 0,
-      branch: None,
-      result: Err("Refresh to load remote history.".into()),
+      target: HistoryTarget::Head,
+      result: Err("Refresh to load history.".into()),
       filter,
       branch_filter,
       rows: Vec::new(),
@@ -54,6 +62,7 @@ impl RemoteHistoryState {
       files: None,
       files_loading: false,
       selected_file: None,
+      local_expanded: true,
       remote_expanded: true,
       collapsed_folders: Default::default(),
       scroll: UniformListScrollHandle::default(),
@@ -141,18 +150,18 @@ impl Lens {
     cx.notify();
   }
 
-  fn browse_remote_branch(&mut self, branch: Option<String>, cx: &mut Context<Self>) {
-    if self.busy || !self.connected || self.remote_history.branch == branch {
+  fn browse_history_target(&mut self, target: HistoryTarget, cx: &mut Context<Self>) {
+    if self.busy || !self.connected || self.remote_history.target == target {
       return;
     }
-    self.remote_history.branch = branch;
+    self.remote_history.target = target;
     self.remote_history.page = 0;
     self.remote_history.limit = remote_history_limit(0);
     self.remote_history.selected = None;
     self.remote_history.files = None;
     self.remote_history.files_loading = false;
     self.remote_history.selected_file = None;
-    self.remote_history.result = Err("Loading remote history…".into());
+    self.remote_history.result = Err("Loading history…".into());
     self.remote_history.scroll.scroll_to_item(0, ScrollStrategy::Top);
     self.refresh(cx);
   }
@@ -185,7 +194,7 @@ impl Lens {
     self.remote_history.collapsed_folders.clear();
     let root = self.root.clone();
     let expected_root = root.clone();
-    let branch = self.remote_history.branch.clone();
+    let target = self.remote_history.target.clone();
     let cli = self.cli.clone();
     let identity = self.settings.identity.clone();
     let revision = hash.clone();
@@ -193,7 +202,7 @@ impl Lens {
     cx.spawn(async move |this, cx| {
       let result = task.await;
       let _ = this.update(cx, |this, cx| {
-        if this.root != expected_root || this.remote_history.branch != branch || this.remote_history.selected.as_ref() != Some(&hash) {
+        if this.root != expected_root || this.remote_history.target != target || this.remote_history.selected.as_ref() != Some(&hash) {
           return;
         }
         this.remote_history.files = Some(result);
@@ -351,7 +360,8 @@ impl Lens {
   fn remote_branch_tree(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let rgb = palette(cx);
     let query = self.remote_history.branch_filter.read(cx).content.to_lowercase();
-    let branches = self.remote_branches.iter().filter(|branch| branch.to_lowercase().contains(&query)).cloned().collect::<Vec<_>>();
+    let local_branches = self.local_branches.iter().filter(|branch| branch.to_lowercase().contains(&query)).cloned().collect::<Vec<_>>();
+    let remote_branches = self.remote_branches.iter().filter(|branch| branch.to_lowercase().contains(&query)).cloned().collect::<Vec<_>>();
     div()
       .size_full()
       .min_h_0()
@@ -377,7 +387,7 @@ impl Lens {
               .px_2()
               .rounded_sm()
               .cursor_pointer()
-              .when(self.remote_history.branch.is_none(), |row| row.bg(rgb(Hover)).text_color(rgb(Accent)))
+              .when(self.remote_history.target == HistoryTarget::Head, |row| row.bg(rgb(Hover)).text_color(rgb(Accent)))
               .child(Icon::new(IconName::GitBranch).size(px(13.)))
               .child(
                 div()
@@ -386,8 +396,47 @@ impl Lens {
                   .overflow_hidden()
                   .child(tf("HEAD · {branch}", &[("branch", self.status.branch.clone())])),
               )
-              .on_click(cx.listener(|this, _, _, cx| this.browse_remote_branch(None, cx))),
+              .on_click(cx.listener(|this, _, _, cx| this.browse_history_target(HistoryTarget::Head, cx))),
           )
+          .child(
+            div()
+              .id("history-locals")
+              .flex()
+              .items_center()
+              .gap_2()
+              .h(px(28.))
+              .px_2()
+              .cursor_pointer()
+              .text_color(rgb(MUTED))
+              .child(Icon::new(if self.remote_history.local_expanded { IconName::ChevronDown } else { IconName::ChevronRight }).size(px(12.)))
+              .child(t("Local"))
+              .on_click(cx.listener(|this, _, _, cx| {
+                this.remote_history.local_expanded = !this.remote_history.local_expanded;
+                cx.notify();
+              })),
+          )
+          .when(self.remote_history.local_expanded, |tree| {
+            tree
+              .when(local_branches.is_empty(), |tree| tree.child(div().px_3().py_1().text_color(rgb(MUTED)).child(t("No local branches"))))
+              .children(local_branches.into_iter().enumerate().map(|(index, branch)| {
+                let selected = self.remote_history.target == HistoryTarget::Local(branch.clone());
+                div()
+                  .id(("history-local-branch", index))
+                  .h(px(27.))
+                  .pl_5()
+                  .pr_2()
+                  .flex()
+                  .items_center()
+                  .gap_2()
+                  .rounded_sm()
+                  .cursor_pointer()
+                  .when(selected, |row| row.bg(rgb(Hover)).text_color(rgb(Accent)))
+                  .hover(move |style| style.bg(rgb(Hover)))
+                  .child(Icon::new(IconName::GitBranch).size(px(12.)))
+                  .child(div().min_w_0().text_ellipsis().overflow_hidden().child(branch.clone()))
+                  .on_click(cx.listener(move |this, _, _, cx| this.browse_history_target(HistoryTarget::Local(branch.clone()), cx)))
+              }))
+          })
           .child(
             div()
               .id("history-remotes")
@@ -407,9 +456,9 @@ impl Lens {
           )
           .when(self.remote_history.remote_expanded, |tree| {
             tree
-              .when(branches.is_empty(), |tree| tree.child(div().px_3().py_1().text_color(rgb(MUTED)).child(t("No remote branches"))))
-              .children(branches.into_iter().enumerate().map(|(index, branch)| {
-                let selected = self.remote_history.branch.as_ref() == Some(&branch);
+              .when(remote_branches.is_empty(), |tree| tree.child(div().px_3().py_1().text_color(rgb(MUTED)).child(t("No remote branches"))))
+              .children(remote_branches.into_iter().enumerate().map(|(index, branch)| {
+                let selected = self.remote_history.target == HistoryTarget::Remote(branch.clone());
                 div()
                   .id(("history-remote-branch", index))
                   .h(px(27.))
@@ -424,7 +473,7 @@ impl Lens {
                   .hover(move |style| style.bg(rgb(Hover)))
                   .child(Icon::new(IconName::GitBranch).size(px(12.)))
                   .child(div().min_w_0().text_ellipsis().overflow_hidden().child(branch.clone()))
-                  .on_click(cx.listener(move |this, _, _, cx| this.browse_remote_branch(Some(branch.clone()), cx)))
+                  .on_click(cx.listener(move |this, _, _, cx| this.browse_history_target(HistoryTarget::Remote(branch.clone()), cx)))
               }))
           }),
       )
@@ -737,12 +786,12 @@ impl Lens {
     let has_next = page_range.end < loaded_total && page_range.end < REMOTE_HISTORY_MAX_COMMITS;
     let branch = self.remote_history.result.as_ref().map_or_else(|_| self.status.branch.clone(), |history| history.branch.clone());
     let message = if !self.connected {
-      t("Open a connected Lore repository to view remote history.")
+      t("Open a connected Lore repository to view history.")
     } else {
       match &self.remote_history.result {
         Ok(_) if loaded_total > 0 => t("No matching commits."),
-        Ok(_) => t("No pushed history for this branch."),
-        Err(error) => tf("Remote history unavailable: {error}", &[("error", t(error))]),
+        Ok(_) => t("No history for this branch."),
+        Err(error) => tf("History unavailable: {error}", &[("error", t(error))]),
       }
     };
     let list = div()
