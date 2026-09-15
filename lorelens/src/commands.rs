@@ -139,7 +139,7 @@ impl Lens {
       self.silent_refresh = silent && self.busy;
       return;
     }
-    self.command_with_mode(vec!["status".into(), "--scan".into()], "Repository status", true, false, silent, cx);
+    self.command_with_mode(vec!["status".into()], "Repository status", true, false, silent, cx);
   }
 
   pub(super) fn command(&mut self, args: Vec<String>, title: &str, status: bool, mutation: bool, cx: &mut Context<Self>) {
