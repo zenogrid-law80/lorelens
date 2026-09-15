@@ -125,17 +125,24 @@ impl Render for SparseEditor {
           .items_center()
           .gap_2()
           .pl(px(depth as f32 * 18.))
-          .child(Button::new(("sparse-expand", index)).ghost().small().label(if expanded { "▾" } else { "▸" }).on_click(move |_, _, cx| {
-            let _ = toggle.update(cx, |this, cx| {
-              if !this.expanded.remove(&target) {
-                this.expanded.insert(target.clone());
-                if !this.folders.contains_key(&target) {
-                  this.fetch(target.clone(), cx);
-                }
-              }
-              cx.notify();
-            });
-          }))
+          .child(
+            Button::new(("sparse-expand", index))
+              .border_0()
+              .ghost()
+              .small()
+              .label(if expanded { "▾" } else { "▸" })
+              .on_click(move |_, _, cx| {
+                let _ = toggle.update(cx, |this, cx| {
+                  if !this.expanded.remove(&target) {
+                    this.expanded.insert(target.clone());
+                    if !this.folders.contains_key(&target) {
+                      this.fetch(target.clone(), cx);
+                    }
+                  }
+                  cx.notify();
+                });
+              }),
+          )
           .child(self.checkbox(&path, path.rsplit('/').next().unwrap_or(&path).to_owned(), &text, index + 1, cx))
           .when(loading, |row| row.child(t("Loading folders…"))),
       );
@@ -148,7 +155,7 @@ impl Render for SparseEditor {
       let path = path.clone();
       tree = tree
         .child(div().text_sm().text_color(palette(cx)(Danger)).child(error.clone()))
-        .child(Button::new(("sparse-retry", index)).small().label(t("Retry")).on_click(move |_, _, cx| {
+        .child(Button::new(("sparse-retry", index)).border_0().small().label(t("Retry")).on_click(move |_, _, cx| {
           let _ = retry.update(cx, |this, cx| this.fetch(path.clone(), cx));
         }));
     }
@@ -159,7 +166,7 @@ impl Render for SparseEditor {
       .gap_2()
       .child(t("Select repository folders, including folders not downloaded locally. Expanding a folder loads its children."))
       .child(div().flex().items_center().gap_3().child(self.checkbox("", t("All repository folders"), &text, 0, cx)).child(
-        Button::new("sparse-reset-selection").small().label(t("Undo selections")).on_click(move |_, _, cx| {
+        Button::new("sparse-reset-selection").border_0().small().label(t("Undo selections")).on_click(move |_, _, cx| {
           let _ = reset.update(cx, |this, cx| {
             this.changes.clear();
             cx.notify();

@@ -8,6 +8,7 @@ impl Lens {
     let remote = self.remote_branches.clone();
     let root = self.root.clone();
     Button::new("branch-menu")
+      .border_0()
       .icon(IconName::GitBranch)
       .h(px(36.))
       .min_w(px(140.))

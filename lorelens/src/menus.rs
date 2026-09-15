@@ -7,6 +7,7 @@ impl Lens {
     let root = self.root.clone();
     let bookmarked = path.as_ref().is_some_and(|path| self.settings.is_bookmarked(&root, path));
     Button::new("bookmark-toggle")
+      .border_0()
       .label(if bookmarked { "★" } else { "☆" })
       .small()
       .disabled(self.busy || path.is_none())
@@ -27,7 +28,7 @@ impl Lens {
 
   pub(super) fn bookmark_list(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
     let view = cx.entity().downgrade();
-    Button::new("bookmark-list").label("▾").small().dropdown_menu(move |mut menu, _, cx| {
+    Button::new("bookmark-list").border_0().label("▾").small().dropdown_menu(move |mut menu, _, cx| {
       let (bookmarks, root, ready) = view
         .update(cx, |this, cx| {
           if this.settings.prune_bookmarks() {
@@ -68,6 +69,7 @@ impl Lens {
       format!("{} ▾", t(kind))
     };
     let button = Button::new(if toolbar { "repository-selector" } else { kind })
+      .border_0()
       .label(label)
       .when(toolbar, |button| button.icon(IconName::Database).h(px(36.)).min_w(px(140.)))
       .when(!toolbar && kind != "Account", |button| button.ghost());

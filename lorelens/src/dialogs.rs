@@ -253,6 +253,7 @@ impl Lens {
             ConflictSort::FullPath => t("Full path"),
           };
           Button::new("conflict-sort")
+            .border_0()
             .small()
             .label(format!("{}: {} ▾", t("Sort"), sort_label))
             .dropdown_menu(move |mut menu, _, _| {
@@ -274,6 +275,7 @@ impl Lens {
       let merge_selection = dialog_selection.clone();
       bulk_actions = bulk_actions.child(
         Button::new("bulk-conflict-merge")
+          .border_0()
           .small()
           .disabled(working || !merge_enabled)
           .label(t("Use Merge"))
@@ -294,14 +296,21 @@ impl Lens {
         let bulk_root = root.clone();
         let bulk_branch = branch.clone();
         let bulk_selection = dialog_selection.clone();
-        bulk_actions = bulk_actions.child(Button::new(id).small().disabled(working || selected_paths.is_empty()).label(t(label)).on_click(move |_, _, cx| {
-          let paths = bulk_selection.borrow().iter().cloned().collect::<Vec<_>>();
-          let _ = bulk_view.update(cx, |this, cx| {
-            if !this.busy && this.connected && this.root == bulk_root && this.status.branch == bulk_branch {
-              this.resolve_conflict_sides(paths, side, cx);
-            }
-          });
-        }));
+        bulk_actions = bulk_actions.child(
+          Button::new(id)
+            .border_0()
+            .small()
+            .disabled(working || selected_paths.is_empty())
+            .label(t(label))
+            .on_click(move |_, _, cx| {
+              let paths = bulk_selection.borrow().iter().cloned().collect::<Vec<_>>();
+              let _ = bulk_view.update(cx, |this, cx| {
+                if !this.busy && this.connected && this.root == bulk_root && this.status.branch == bulk_branch {
+                  this.resolve_conflict_sides(paths, side, cx);
+                }
+              });
+            }),
+        );
       }
       let filter_target_state = conflict_filter_target.clone();
       let filters = div()
@@ -335,15 +344,27 @@ impl Lens {
           let merge_root = root.clone();
           let merge_branch = branch.clone();
           let merge_path = path.clone();
-          choices = choices.child(Button::new(("conflict-merge", index)).primary().small().disabled(working).label(t("Merge")).on_click(move |_, _, cx| {
-            cx.stop_propagation();
-            let _ = merge_view.update(cx, |this, cx| {
-              if !this.busy && this.connected && this.root == merge_root && this.status.branch == merge_branch && this.status.changes.iter().any(|change| change.path == merge_path && change.conflict)
-              {
-                this.external_merge(vec![merge_path.clone()], cx);
-              }
-            });
-          }));
+          choices = choices.child(
+            Button::new(("conflict-merge", index))
+              .border_0()
+              .primary()
+              .small()
+              .disabled(working)
+              .label(t("Merge"))
+              .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                let _ = merge_view.update(cx, |this, cx| {
+                  if !this.busy
+                    && this.connected
+                    && this.root == merge_root
+                    && this.status.branch == merge_branch
+                    && this.status.changes.iter().any(|change| change.path == merge_path && change.conflict)
+                  {
+                    this.external_merge(vec![merge_path.clone()], cx);
+                  }
+                });
+              }),
+          );
         }
         if inputs.is_some() {
           for (id, label, side) in [("conflict-mine", "Mine", backend::MergeSide::Mine), ("conflict-theirs", "Theirs", backend::MergeSide::Theirs)] {
@@ -351,7 +372,7 @@ impl Lens {
             let side_root = root.clone();
             let side_branch = branch.clone();
             let side_path = path.clone();
-            choices = choices.child(Button::new((id, index)).small().disabled(working).label(t(label)).on_click(move |_, _, cx| {
+            choices = choices.child(Button::new((id, index)).border_0().small().disabled(working).label(t(label)).on_click(move |_, _, cx| {
               cx.stop_propagation();
               let _ = side_view.update(cx, |this, cx| {
                 if !this.busy && this.connected && this.root == side_root && this.status.branch == side_branch && this.status.changes.iter().any(|change| change.path == side_path && change.conflict) {
@@ -526,7 +547,7 @@ impl Lens {
         let theme_view = view.clone();
         let theme = name.to_string();
         let label = if current == theme { format!("✓ {theme}") } else { theme.clone() };
-        theme_list = theme_list.child(Button::new(("theme-option", index)).label(label).w_full().on_click(move |_, window, cx| {
+        theme_list = theme_list.child(Button::new(("theme-option", index)).border_0().label(label).w_full().on_click(move |_, window, cx| {
           let selected_theme = theme.clone();
           let _ = theme_view.update(cx, |this, cx| {
             this.settings.theme = theme.clone();
@@ -582,7 +603,7 @@ impl Lens {
         .child(arguments.clone())
         .child({
           let (name, location, arguments) = (name.clone(), location.clone(), arguments.clone());
-          Button::new("custom-tool-preset").label(t("Tool preset…")).dropdown_menu(move |mut menu, _, _| {
+          Button::new("custom-tool-preset").border_0().label(t("Tool preset…")).dropdown_menu(move |mut menu, _, _| {
             for (label, tool, template) in presets {
               let (name, location, arguments) = (name.clone(), location.clone(), arguments.clone());
               let executable = external_tools::suggested_executable(tool).unwrap_or_default().to_string_lossy().into_owned();
@@ -1780,7 +1801,7 @@ impl Lens {
       .gap_2()
       .items_center()
       .child(div().flex_1().min_w_0().child(input))
-      .child(Button::new(id).label("▾").dropdown_menu(move |mut menu, _, _| {
+      .child(Button::new(id).border_0().label("▾").dropdown_menu(move |mut menu, _, _| {
         if history.is_empty() {
           return menu.item(PopupMenuItem::new(t("No history")).disabled(true));
         }

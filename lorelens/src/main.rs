@@ -67,11 +67,11 @@ fn canonicalize_path(path: PathBuf) -> PathBuf {
 fn dialog_footer(id: &'static str, ok_text: String, show_cancel: bool) -> DialogFooter {
   DialogFooter::new()
     .when(show_cancel, |footer| {
-      footer.child(Button::new("dialog-cancel").label(t("Cancel")).on_click(|_, window, cx| {
+      footer.child(Button::new("dialog-cancel").border_0().label(t("Cancel")).on_click(|_, window, cx| {
         window.dispatch_action(Box::new(Cancel), cx);
       }))
     })
-    .child(Button::new(id).primary().label(ok_text).on_click(|_, window, cx| {
+    .child(Button::new(id).border_0().primary().label(ok_text).on_click(|_, window, cx| {
       window.dispatch_action(Box::new(Confirm { secondary: false }), cx);
     }))
 }
@@ -876,6 +876,7 @@ impl Lens {
       _ => None,
     };
     Button::new(id)
+      .border_0()
       .label(t(label))
       .small()
       .h(px(34.))

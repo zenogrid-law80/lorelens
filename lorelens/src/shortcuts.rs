@@ -245,105 +245,109 @@ impl Lens {
     let encoding = self.settings.text_encoding.clone();
     let extension_count = self.settings.text_extensions.len();
     let ready = !self.busy;
-    Button::new("options-menu").ghost().label(format!("{} ▾", t("Options"))).dropdown_menu(move |menu, window, cx| {
-      let refresh_view = view.clone();
-      let menu = menu
-        .item(PopupMenuItem::new(t("Auto refresh (30s)")).checked(auto_refresh).on_click(move |_, _, cx| {
-          let _ = refresh_view.update(cx, |this, cx| {
-            this.settings.auto_refresh = !this.settings.auto_refresh;
-            this.next_refresh = std::time::Instant::now() + std::time::Duration::from_secs(30);
-            this.save_settings();
-            cx.notify();
-          });
-        }))
-        .separator();
-      let selection_view = view.clone();
-      let current = selected.clone();
-      let menu = menu.submenu(tf("Diff / Merge: {selected}", &[("selected", selected_label.clone())]), window, cx, move |mut menu, _, _| {
-        for tool in external_tools::TOOLS {
-          let view = selection_view.clone();
-          menu = menu.item(PopupMenuItem::new(if tool == current { format!("✓ {tool}") } else { tool.into() }).on_click(move |_, _, cx| {
-            let _ = view.update(cx, |this, cx| {
-              this.settings.external_tool = tool.into();
-              this.save_settings();
-              if external_tools::resolve(tool, this.settings.tool_paths.get(tool)).is_none() {
-                this.choose_tool(tool.into(), None, cx);
-              }
-              cx.notify();
-            });
-          }));
-        }
-        let custom_view = selection_view.clone();
-        menu = menu.separator().item(PopupMenuItem::new(t("Custom tool…")).on_click(move |_, window, cx| {
-          let _ = custom_view.update(cx, |this, cx| this.custom_tool_dialog(window, cx));
-        }));
-        menu
-      });
-      let cli_view = view.clone();
-      let menu = menu.item(PopupMenuItem::new(t("Locate Lore CLI…")).on_click(move |_, _, cx| {
-        let _ = cli_view.update(cx, |this, cx| this.choose(true, cx));
-      }));
-      let text_files_view = view.clone();
-      let text_files_line_ending = line_ending.clone();
-      let text_files_encoding = encoding.clone();
-      let menu = menu.separator().submenu(t("Text file settings"), window, cx, move |mut menu, _, _| {
-        let line_ending_view = text_files_view.clone();
-        let current_line_ending = text_files_line_ending.clone();
-        menu = menu.label(t("Line endings"));
-        for value in ["System", "LF", "CR", "CRLF"] {
-          let view = line_ending_view.clone();
-          menu = menu.item(PopupMenuItem::new(t(value)).checked(value == current_line_ending).on_click(move |_, _, cx| {
-            let _ = view.update(cx, |this, cx| {
-              this.settings.text_line_ending = value.into();
+    Button::new("options-menu")
+      .border_0()
+      .ghost()
+      .label(format!("{} ▾", t("Options")))
+      .dropdown_menu(move |menu, window, cx| {
+        let refresh_view = view.clone();
+        let menu = menu
+          .item(PopupMenuItem::new(t("Auto refresh (30s)")).checked(auto_refresh).on_click(move |_, _, cx| {
+            let _ = refresh_view.update(cx, |this, cx| {
+              this.settings.auto_refresh = !this.settings.auto_refresh;
+              this.next_refresh = std::time::Instant::now() + std::time::Duration::from_secs(30);
               this.save_settings();
               cx.notify();
             });
-          }));
-        }
-        let encoding_view = text_files_view.clone();
-        let current_encoding = text_files_encoding.clone();
-        menu = menu.separator().label(t("Encoding"));
-        for value in ["System", "UTF-8", "UTF-8 no BOM"] {
-          let view = encoding_view.clone();
-          menu = menu.item(PopupMenuItem::new(t(value)).checked(value == current_encoding).on_click(move |_, _, cx| {
-            let _ = view.update(cx, |this, cx| {
-              this.settings.text_encoding = value.into();
-              this.save_settings();
-              cx.notify();
-            });
-          }));
-        }
-        let extensions_view = text_files_view.clone();
-        menu
-          .separator()
-          .label(tf("Text file extensions ({count})", &[("count", extension_count.to_string())]))
-          .item(PopupMenuItem::new(t("Manage text file extensions…")).on_click(move |_, window, cx| {
-            let _ = extensions_view.update(cx, |this, cx| this.text_extensions_dialog(window, cx));
           }))
-      });
-      let obliterate_view = view.clone();
-      let view = view.clone();
-      let menu = menu
-        .separator()
-        .item(PopupMenuItem::new(t("Obliterate")).checked(obliterate_enabled).disabled(!ready).on_click(move |_, _, cx| {
-          let _ = obliterate_view.update(cx, |this, cx| {
-            if !this.busy {
-              this.obliterate_enabled = !this.obliterate_enabled;
-              cx.notify();
-            }
-          });
-        }))
-        .separator();
-      let bookmark_view = view.clone();
-      let settings_view = view.clone();
-      menu
-        .item(PopupMenuItem::new(t("Manage bookmarks…")).on_click(move |_, window, cx| {
-          let _ = bookmark_view.update(cx, |this, cx| this.bookmarks_dialog(window, cx));
-        }))
-        .item(PopupMenuItem::new(t("Keyboard shortcuts")).on_click(move |_, window, cx| {
-          let _ = settings_view.update(cx, |this, cx| this.shortcuts_dialog(window, cx));
-        }))
-    })
+          .separator();
+        let selection_view = view.clone();
+        let current = selected.clone();
+        let menu = menu.submenu(tf("Diff / Merge: {selected}", &[("selected", selected_label.clone())]), window, cx, move |mut menu, _, _| {
+          for tool in external_tools::TOOLS {
+            let view = selection_view.clone();
+            menu = menu.item(PopupMenuItem::new(if tool == current { format!("✓ {tool}") } else { tool.into() }).on_click(move |_, _, cx| {
+              let _ = view.update(cx, |this, cx| {
+                this.settings.external_tool = tool.into();
+                this.save_settings();
+                if external_tools::resolve(tool, this.settings.tool_paths.get(tool)).is_none() {
+                  this.choose_tool(tool.into(), None, cx);
+                }
+                cx.notify();
+              });
+            }));
+          }
+          let custom_view = selection_view.clone();
+          menu = menu.separator().item(PopupMenuItem::new(t("Custom tool…")).on_click(move |_, window, cx| {
+            let _ = custom_view.update(cx, |this, cx| this.custom_tool_dialog(window, cx));
+          }));
+          menu
+        });
+        let cli_view = view.clone();
+        let menu = menu.item(PopupMenuItem::new(t("Locate Lore CLI…")).on_click(move |_, _, cx| {
+          let _ = cli_view.update(cx, |this, cx| this.choose(true, cx));
+        }));
+        let text_files_view = view.clone();
+        let text_files_line_ending = line_ending.clone();
+        let text_files_encoding = encoding.clone();
+        let menu = menu.separator().submenu(t("Text file settings"), window, cx, move |mut menu, _, _| {
+          let line_ending_view = text_files_view.clone();
+          let current_line_ending = text_files_line_ending.clone();
+          menu = menu.label(t("Line endings"));
+          for value in ["System", "LF", "CR", "CRLF"] {
+            let view = line_ending_view.clone();
+            menu = menu.item(PopupMenuItem::new(t(value)).checked(value == current_line_ending).on_click(move |_, _, cx| {
+              let _ = view.update(cx, |this, cx| {
+                this.settings.text_line_ending = value.into();
+                this.save_settings();
+                cx.notify();
+              });
+            }));
+          }
+          let encoding_view = text_files_view.clone();
+          let current_encoding = text_files_encoding.clone();
+          menu = menu.separator().label(t("Encoding"));
+          for value in ["System", "UTF-8", "UTF-8 no BOM"] {
+            let view = encoding_view.clone();
+            menu = menu.item(PopupMenuItem::new(t(value)).checked(value == current_encoding).on_click(move |_, _, cx| {
+              let _ = view.update(cx, |this, cx| {
+                this.settings.text_encoding = value.into();
+                this.save_settings();
+                cx.notify();
+              });
+            }));
+          }
+          let extensions_view = text_files_view.clone();
+          menu
+            .separator()
+            .label(tf("Text file extensions ({count})", &[("count", extension_count.to_string())]))
+            .item(PopupMenuItem::new(t("Manage text file extensions…")).on_click(move |_, window, cx| {
+              let _ = extensions_view.update(cx, |this, cx| this.text_extensions_dialog(window, cx));
+            }))
+        });
+        let obliterate_view = view.clone();
+        let view = view.clone();
+        let menu = menu
+          .separator()
+          .item(PopupMenuItem::new(t("Obliterate")).checked(obliterate_enabled).disabled(!ready).on_click(move |_, _, cx| {
+            let _ = obliterate_view.update(cx, |this, cx| {
+              if !this.busy {
+                this.obliterate_enabled = !this.obliterate_enabled;
+                cx.notify();
+              }
+            });
+          }))
+          .separator();
+        let bookmark_view = view.clone();
+        let settings_view = view.clone();
+        menu
+          .item(PopupMenuItem::new(t("Manage bookmarks…")).on_click(move |_, window, cx| {
+            let _ = bookmark_view.update(cx, |this, cx| this.bookmarks_dialog(window, cx));
+          }))
+          .item(PopupMenuItem::new(t("Keyboard shortcuts")).on_click(move |_, window, cx| {
+            let _ = settings_view.update(cx, |this, cx| this.shortcuts_dialog(window, cx));
+          }))
+      })
   }
 
   fn text_extensions_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -411,7 +415,7 @@ impl Lens {
                 .py_1()
                 .child(div().w(px(250.)).overflow_hidden().text_ellipsis().child(root.display().to_string()))
                 .child(div().flex_1().child(input.clone()))
-                .child(Button::new(("remove-bookmark", *index)).label(t("Remove")).small().on_click(move |_, window, _| {
+                .child(Button::new(("remove-bookmark", *index)).border_0().label(t("Remove")).small().on_click(move |_, window, _| {
                   removed.set(true);
                   window.refresh();
                 }))
@@ -504,7 +508,7 @@ impl Lens {
                 .child(div().flex_1().child(inputs[i].clone()))
             })),
         )
-        .child(Button::new("reset-shortcuts").label(t("Restore defaults")).on_click(move |_, _, cx| {
+        .child(Button::new("reset-shortcuts").border_0().label(t("Restore defaults")).on_click(move |_, _, cx| {
           for (input, &(_, _, default, _)) in reset_inputs.iter().zip(COMMANDS) {
             input.update(cx, |input, cx| {
               input.reset();
