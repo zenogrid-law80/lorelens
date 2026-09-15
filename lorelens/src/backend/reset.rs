@@ -18,6 +18,12 @@ pub fn reset_commands(root: &Path, paths: &[String]) -> Vec<Vec<String>> {
   vec![unstage, reset]
 }
 
+/// Force Lore to reset folders even when status has no matching Change entry.
+/// The separator protects folder names that look like command options.
+pub fn force_reset_commands(paths: &[String]) -> Vec<Vec<String>> {
+  paths.iter().map(|path| vec!["reset".into(), "--force".into(), "--".into(), path.clone()]).collect()
+}
+
 #[cfg(test)]
 mod tests {
   use super::reset_commands;
@@ -27,6 +33,18 @@ mod tests {
   #[test]
   fn empty_selection_runs_nothing() {
     assert!(reset_commands(Path::new("C:\\repo"), &[]).is_empty());
+    assert!(super::force_reset_commands(&[]).is_empty());
+  }
+
+  #[test]
+  fn force_reset_targets_each_folder_directly() {
+    assert_eq!(
+      super::force_reset_commands(&["Content".into(), "--option-like".into()]),
+      [
+        ["reset", "--force", "--", "Content"].map(str::to_owned).to_vec(),
+        ["reset", "--force", "--", "--option-like"].map(str::to_owned).to_vec(),
+      ]
+    );
   }
 
   #[test]

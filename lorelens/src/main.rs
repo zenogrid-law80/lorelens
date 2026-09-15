@@ -39,7 +39,7 @@ use gpui_component::{
 };
 use gpui_component::{Sizable, button::ButtonVariants};
 use gpui_kit_assets::IconName;
-use input::TextInput;
+use input::{CommitMessage, TextInput};
 use std::{path::PathBuf, process::Command};
 
 include!(concat!(env!("OUT_DIR"), "/bundled_themes.rs"));
@@ -137,6 +137,7 @@ struct Lens {
   directory: PathBuf,
   cli: PathBuf,
   entries: Vec<Entry>,
+  file_filter_generation: u64,
   expanded_folders: std::collections::HashSet<PathBuf>,
   collapsed_change_folders: std::collections::HashSet<String>,
   status: Status,
@@ -152,12 +153,13 @@ struct Lens {
   output: String,
   output_title: String,
   logs: Vec<String>,
-  message: Entity<TextInput>,
+  message: Entity<CommitMessage>,
   filter: Entity<TextInput>,
   pending_filter: Entity<TextInput>,
   selected_path: Entity<TextInput>,
   pending_visible: Vec<usize>,
   pending_rows: Vec<PendingTreeRow>,
+  pending_folder_focus: Option<String>,
   notice: String,
   error: bool,
   show_log: bool,
@@ -211,9 +213,7 @@ impl Lens {
       format!("{action} {scope} ({count} files)", count = staged.len())
     };
     self.message.update(cx, |input, cx| {
-      input.reset();
-      input.content = message.into();
-      cx.notify();
+      input.set_value(message, cx);
     });
     self.error = false;
     self.notice = "Generated commit message from staged changes.".into();
@@ -224,7 +224,7 @@ impl Lens {
     if self.busy || !self.connected || !self.status.changes.iter().any(|c| c.staged) {
       return;
     }
-    let message = self.message.read(cx).content.trim().to_string();
+    let message = self.message.read(cx).value(cx).trim().to_string();
     if message.is_empty() {
       self.error = true;
       self.notice = "Enter a commit message first.".into();
@@ -447,12 +447,12 @@ impl Lens {
     cx.notify();
   }
 
-  fn new(root: PathBuf, settings: settings::Settings, settings_error: Option<String>, cx: &mut Context<Self>) -> Self {
+  fn new(root: PathBuf, settings: settings::Settings, settings_error: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
     i18n::set_locale(&settings.language);
     let show_log = settings.show_command_log;
     let connect_after_load = backend::is_repository(&root);
     let filter = cx.new(|cx| TextInput::new("Filter files…", cx).with_icon(IconName::Search));
-    cx.observe(&filter, |_, _, cx| cx.notify()).detach();
+    cx.observe(&filter, |this, _, cx| this.refresh_file_filter(cx)).detach();
     let pending_filter = cx.new(|cx| TextInput::new("Filter changes…", cx).with_icon(IconName::Search));
     cx.observe(&pending_filter, |_, _, cx| cx.notify()).detach();
     let selected_path = cx.new(|cx| TextInput::new("", cx).read_only());
@@ -463,7 +463,7 @@ impl Lens {
             command_log_scroll: ScrollHandle::new(),
             pending_scroll: UniformListScrollHandle::new(),
             folder_to_select: None,
-            directory: root.clone(), root, cli: settings.cli.clone().filter(|path| path.is_file()).unwrap_or_else(backend::find_cli), entries: vec![],
+            directory: root.clone(), root, cli: settings.cli.clone().filter(|path| path.is_file()).unwrap_or_else(backend::find_cli), entries: vec![], file_filter_generation: 0,
             status: Status::default(), connected: false, busy: false, silent_refresh: false, tab: Tab::Pending,
             locked_paths: Default::default(),
             expanded_folders: Default::default(),
@@ -472,7 +472,8 @@ impl Lens {
             file_history: history::FileHistoryState::default(),
             remote_history: remote_history::RemoteHistoryState::new(cx),
             output_title: "Welcome to LoreLens".into(), logs: vec![],
-            message: cx.new(|cx| TextInput::new("Describe your staged changes…", cx)),
+            message: cx.new(|cx| CommitMessage::new(window, cx)),
+            pending_folder_focus: None,
             filter, pending_filter, selected_path, pending_visible: Vec::new(), pending_rows: Vec::new(), notice: "Opening repository…".into(), error: false, show_log, obliterate_enabled: false,
             settings, settings_error, branch_output: String::new(), show_branches: false,
             connect_after_load,
@@ -578,6 +579,7 @@ impl Lens {
     self.entries.clear();
     self.expanded_folders.clear();
     self.collapsed_change_folders.clear();
+    self.pending_folder_focus = None;
     self.branch_output.clear();
     self.local_branches.clear();
     self.remote_branches.clear();
@@ -604,6 +606,7 @@ impl Lens {
     if self.logs.len() > 100 {
       self.logs.remove(0);
     }
+    self.command_log_scroll.scroll_to_bottom();
   }
 
   fn open_command_window(&mut self, path: &std::path::Path) {
@@ -628,13 +631,25 @@ impl Lens {
       return;
     }
     self.preview.invalidate();
+    self.file_filter_generation = self.file_filter_generation.wrapping_add(1);
+    let generation = self.file_filter_generation;
     self.busy = true;
     let root = self.root.clone();
     let expanded = self.expanded_folders.clone();
-    let task = cx.background_executor().spawn(async move { backend::list_tree(&root, &expanded) });
+    let query = self.filter.read(cx).content.to_string();
+    let task = cx.background_executor().spawn(async move {
+      if query.trim().is_empty() {
+        backend::list_tree(&root, &expanded)
+      } else {
+        backend::search_tree(&root, &query)
+      }
+    });
     cx.spawn(async move |this, cx| {
       let result = task.await;
       let _ = this.update(cx, |this, cx| {
+        if this.file_filter_generation != generation {
+          return;
+        }
         this.busy = false;
         match result {
           Ok(entries) => {
@@ -671,6 +686,43 @@ impl Lens {
     })
     .detach();
     cx.notify();
+  }
+
+  fn refresh_file_filter(&mut self, cx: &mut Context<Self>) {
+    self.file_filter_generation = self.file_filter_generation.wrapping_add(1);
+    let generation = self.file_filter_generation;
+    let query = self.filter.read(cx).content.to_string();
+    let root = self.root.clone();
+    let expected_root = root.clone();
+    let expanded = self.expanded_folders.clone();
+    let task = cx.background_executor().spawn(async move {
+      if query.trim().is_empty() {
+        backend::list_tree(&root, &expanded)
+      } else {
+        backend::search_tree(&root, &query)
+      }
+    });
+    cx.spawn(async move |this, cx| {
+      let result = task.await;
+      let _ = this.update(cx, |this, cx| {
+        if this.file_filter_generation != generation || this.root != expected_root {
+          return;
+        }
+        match result {
+          Ok(entries) => {
+            this.entries = entries;
+            this.error = false;
+          }
+          Err(error) => {
+            this.error = true;
+            this.notice = error;
+          }
+        }
+        this.files_scroll.set_offset(point(px(0.), px(0.)));
+        cx.notify();
+      });
+    })
+    .detach();
   }
 
   fn open_bookmark(&mut self, path: PathBuf, cx: &mut Context<Self>) {
@@ -769,6 +821,7 @@ impl Lens {
       return;
     }
     self.selection.select(path.clone());
+    self.pending_folder_focus = None;
     if self.tab == Tab::History {
       self.open_file_history(path, 100, cx);
       return;
@@ -852,7 +905,7 @@ impl Lens {
     let expanded = !self.collapsed_change_folders.contains(&path) || filtering;
     let folder_change = change_index.and_then(|index| self.status.changes.get(index));
     let checkbox = folder_change.map(|change| (change_index.expect("folder change index"), change.path.clone()));
-    let selected = folder_change.is_some_and(|change| self.selection.paths.contains(&change.path));
+    let selected = self.pending_folder_focus.as_ref() == Some(&path) || folder_change.is_some_and(|change| self.selection.paths.contains(&change.path));
     let (selected_background, selected_foreground) = selected_row_palette(cx, window_active);
     let action = folder_change.map(|change| change.action.as_str()).unwrap_or("");
     let state = folder_change.map_or("", |change| {
@@ -872,7 +925,7 @@ impl Lens {
         .id(("pending-folder", index))
         .flex()
         .items_center()
-        .h(px(29.))
+        .h(px(25.))
         .px_3()
         .gap_2()
         .border_b_1()
@@ -893,6 +946,7 @@ impl Lens {
                 if this.busy {
                   return;
                 }
+                this.pending_folder_focus = None;
                 if *checked {
                   this.selection.paths.insert(change_path.clone());
                   this.selection.current = Some(change_path.clone());
@@ -963,7 +1017,11 @@ impl Lens {
         )
         .on_click(cx.listener(move |this, _, window, cx| {
           window.focus(&this.pending_focus, cx);
-          if this.busy || !this.pending_filter.read(cx).content.is_empty() {
+          if this.busy {
+            return;
+          }
+          this.select_pending_row(index, false, cx);
+          if !this.pending_filter.read(cx).content.is_empty() {
             return;
           }
           if !this.collapsed_change_folders.remove(&path) {
@@ -1149,6 +1207,7 @@ impl Lens {
             return;
           }
           let modifiers = event.modifiers();
+          this.pending_folder_focus = None;
           let additive = modifiers.control || modifiers.platform;
           if !additive && !modifiers.shift {
             this.select(path.clone(), cx);
@@ -1330,7 +1389,7 @@ impl Lens {
             );
           }
           for unstage_only in [true, false] {
-            if (unstage_only && unstage_paths.is_empty()) || (!unstage_only && !revert) {
+            if (unstage_only && unstage_paths.is_empty()) || (!unstage_only && (single_file || !revert)) {
               continue;
             }
             let view = view.clone();
@@ -1639,7 +1698,7 @@ impl Lens {
       .id(("file-row", index))
       .flex()
       .items_center()
-      .h(px(29.))
+      .h(px(25.))
       .px_3()
       .gap_2()
       .border_b_1()
@@ -1742,9 +1801,16 @@ fn main() {
     apply_theme(&settings.theme, None, cx);
     input::init(cx);
     let bounds = Bounds::centered(None, size(px(1360.), px(900.)), cx);
+    let window_bounds = if settings.window_fullscreen {
+      WindowBounds::Fullscreen(bounds)
+    } else if settings.window_maximized {
+      WindowBounds::Maximized(bounds)
+    } else {
+      WindowBounds::Windowed(bounds)
+    };
     cx.open_window(
       WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        window_bounds: Some(window_bounds),
         window_min_size: Some(size(px(1000.), px(700.))),
         titlebar: Some(TitlebarOptions {
           title: Some(t("LoreLens — Desktop repository client").into()),
@@ -1753,8 +1819,18 @@ fn main() {
         ..Default::default()
       },
       move |window, cx| {
-        let view = cx.new(|cx| Lens::new(root, settings, settings_error, cx));
+        let view = cx.new(|cx| Lens::new(root, settings, settings_error, window, cx));
         view.update(cx, |this, cx| {
+          cx.observe_window_bounds(window, |this, window, _| {
+            let maximized = window.is_maximized();
+            let fullscreen = window.is_fullscreen();
+            if this.settings.window_maximized != maximized || this.settings.window_fullscreen != fullscreen {
+              this.settings.window_maximized = maximized;
+              this.settings.window_fullscreen = fullscreen;
+              this.save_settings();
+            }
+          })
+          .detach();
           cx.observe_in(&cx.entity(), window, |this, _, window, cx| {
             this.conflict_dialog_working.set(this.busy);
             #[cfg(windows)]

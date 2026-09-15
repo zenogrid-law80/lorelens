@@ -8,6 +8,60 @@ pub(super) enum PendingTreeRow {
   Change { index: usize, name: String, depth: usize },
 }
 
+impl PendingTreeRow {
+  pub fn depth(&self) -> usize {
+    match self {
+      Self::Folder { depth, .. } | Self::Change { depth, .. } => *depth,
+    }
+  }
+
+  pub fn change_index(&self) -> Option<usize> {
+    match self {
+      Self::Folder { change_index, .. } => *change_index,
+      Self::Change { index, .. } => Some(*index),
+    }
+  }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum PendingNavigation {
+  Select(usize),
+  Expand(String),
+  Collapse(String),
+}
+
+pub(super) fn navigate_pending(rows: &[PendingTreeRow], current: Option<usize>, key: &str, collapsed: &HashSet<String>, filtering: bool) -> Option<PendingNavigation> {
+  use PendingNavigation::*;
+  if rows.is_empty() {
+    return None;
+  }
+  let current = current.filter(|index| *index < rows.len());
+  if key == "up" {
+    return Some(Select(current.map_or(rows.len() - 1, |index| index.saturating_sub(1))));
+  }
+  if key == "down" {
+    return Some(Select(current.map_or(0, |index| (index + 1).min(rows.len() - 1))));
+  }
+  let index = current?;
+  let row = &rows[index];
+  if let PendingTreeRow::Folder { path, .. } = row {
+    let expanded = filtering || !collapsed.contains(path);
+    if key == "left" && expanded && !filtering {
+      return Some(Collapse(path.clone()));
+    }
+    if key == "right" {
+      if !expanded {
+        return Some(Expand(path.clone()));
+      }
+      return rows.get(index + 1).filter(|child| child.depth() > row.depth()).map(|_| Select(index + 1));
+    }
+  }
+  if key == "left" {
+    return (0..index).rev().find(|parent| rows[*parent].depth() < row.depth()).map(Select);
+  }
+  None
+}
+
 #[derive(Default)]
 struct PendingTreeFolder {
   name: String,
@@ -199,6 +253,42 @@ mod tests {
       path: path.into(),
       ..Default::default()
     }
+  }
+
+  #[test]
+  fn pending_keyboard_navigation_tracks_visible_rows_and_boundaries() {
+    use PendingNavigation::*;
+    let changes = vec![change("src/a.rs"), change("src/nested/b.rs"), change("z.txt")];
+    let collapsed = HashSet::new();
+    let rows = pending_tree_rows(&changes, &[0, 1, 2], &collapsed);
+    assert_eq!(navigate_pending(&rows, None, "down", &collapsed, false), Some(Select(0)));
+    assert_eq!(navigate_pending(&rows, None, "up", &collapsed, false), Some(Select(4)));
+    assert_eq!(navigate_pending(&rows, Some(0), "up", &collapsed, false), Some(Select(0)));
+    assert_eq!(navigate_pending(&rows, Some(4), "down", &collapsed, false), Some(Select(4)));
+    assert_eq!(navigate_pending(&rows, Some(1), "down", &collapsed, false), Some(Select(2)));
+    assert_eq!(navigate_pending(&rows, Some(3), "left", &collapsed, false), Some(Select(2)));
+    assert_eq!(navigate_pending(&rows, Some(0), "right", &collapsed, false), Some(Select(1)));
+    assert_eq!(navigate_pending(&rows, Some(1), "right", &collapsed, false), None);
+    assert_eq!(navigate_pending(&rows, Some(0), "left", &collapsed, false), Some(Collapse("src".into())));
+    assert_eq!(navigate_pending(&[], None, "down", &collapsed, false), None);
+  }
+
+  #[test]
+  fn pending_keyboard_navigation_handles_collapsed_compact_and_filtered_folders() {
+    use PendingNavigation::*;
+    let changes = vec![change("src/ui/forms/a.rs"), change("z.txt")];
+    let collapsed = HashSet::from(["src".into()]);
+    let rows = pending_tree_rows(&changes, &[0, 1], &collapsed);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(navigate_pending(&rows, Some(0), "down", &collapsed, false), Some(Select(1)));
+    assert_eq!(navigate_pending(&rows, Some(0), "right", &collapsed, false), Some(Expand("src".into())));
+    assert_eq!(navigate_pending(&rows, Some(0), "left", &collapsed, false), None);
+    let filtered = pending_tree_rows(&changes, &[0], &HashSet::new());
+    assert_eq!(navigate_pending(&filtered, Some(0), "left", &collapsed, true), None);
+    assert_eq!(navigate_pending(&filtered, Some(0), "right", &collapsed, true), Some(Select(1)));
+    assert_eq!(navigate_pending(&filtered, Some(1), "left", &collapsed, true), Some(Select(0)));
+    assert_eq!(navigate_pending(&filtered, Some(1), "down", &collapsed, true), Some(Select(1)));
+    assert_eq!(navigate_pending(&filtered, Some(99), "down", &collapsed, true), Some(Select(0)));
   }
 
   #[test]

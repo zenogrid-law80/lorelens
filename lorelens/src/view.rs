@@ -1,5 +1,83 @@
 use super::*;
 
+impl Lens {
+  pub(super) fn select_pending_row(&mut self, index: usize, range: bool, cx: &mut Context<Self>) {
+    let Some(row) = self.pending_rows.get(index).cloned() else { return };
+    self.pending_folder_focus = None;
+    if let Some(change_index) = row.change_index() {
+      let path = self.status.changes[change_index].path.clone();
+      if range {
+        let visible: Vec<_> = self
+          .pending_rows
+          .iter()
+          .filter_map(|row| row.change_index())
+          .map(|index| self.status.changes[index].path.clone())
+          .collect();
+        self.selection.click(path, &visible, false, true);
+        self.preview.invalidate();
+      } else {
+        self.select(path, cx);
+      }
+    } else {
+      if !range {
+        self.selection.clear();
+      }
+      self.preview.invalidate();
+    }
+    if let PendingTreeRow::Folder { path, .. } = row {
+      self.pending_folder_focus = Some(path);
+    }
+    self.pending_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+    self.notice = tf("{count} items selected", &[("count", self.selection.paths.len().to_string())]);
+    cx.notify();
+  }
+
+  fn handle_pending_key(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    let modifiers = event.keystroke.modifiers;
+    let key = event.keystroke.key.as_str();
+    if key == "a" && (modifiers.control || modifiers.platform) && !modifiers.alt && !modifiers.shift {
+      cx.stop_propagation();
+      if self.busy {
+        return;
+      }
+      let visible: Vec<_> = self.pending_visible.iter().map(|index| self.status.changes[*index].path.clone()).collect();
+      self.pending_folder_focus = None;
+      self.selection.select_all(&visible);
+      self.preview.invalidate();
+      self.notice = tf("{count} items selected", &[("count", self.selection.paths.len().to_string())]);
+      cx.notify();
+      return;
+    }
+    if !matches!(key, "up" | "down" | "left" | "right") || modifiers.alt || modifiers.control || modifiers.platform {
+      return;
+    }
+    cx.stop_propagation();
+    if self.busy {
+      return;
+    }
+    let current = self.pending_rows.iter().position(|row| {
+      if let Some(folder) = &self.pending_folder_focus {
+        matches!(row, PendingTreeRow::Folder { path, .. } if path == folder)
+      } else {
+        row.change_index().is_some_and(|index| self.selection.current.as_ref() == Some(&self.status.changes[index].path))
+      }
+    });
+    let filtering = !self.pending_filter.read(cx).content.is_empty();
+    match state::navigate_pending(&self.pending_rows, current, key, &self.collapsed_change_folders, filtering) {
+      Some(state::PendingNavigation::Select(index)) => self.select_pending_row(index, modifiers.shift, cx),
+      Some(state::PendingNavigation::Expand(path)) => {
+        self.collapsed_change_folders.remove(&path);
+        cx.notify();
+      }
+      Some(state::PendingNavigation::Collapse(path)) => {
+        self.collapsed_change_folders.insert(path);
+        cx.notify();
+      }
+      None => {}
+    }
+  }
+}
+
 impl Render for Lens {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let rgb = palette(cx);
@@ -87,20 +165,7 @@ impl Render for Lens {
           window.focus(&this.pending_focus, cx);
         }),
       )
-      .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-        let modifiers = event.keystroke.modifiers;
-        if event.keystroke.key == "a" && (modifiers.control || modifiers.platform) && !modifiers.alt && !modifiers.shift {
-          cx.stop_propagation();
-          if this.busy {
-            return;
-          }
-          let visible: Vec<_> = this.pending_visible.iter().map(|index| this.status.changes[*index].path.clone()).collect();
-          this.selection.select_all(&visible);
-          this.preview.invalidate();
-          this.notice = tf("{count} items selected", &[("count", this.selection.paths.len().to_string())]);
-          cx.notify();
-        }
-      }))
+      .on_key_down(cx.listener(Self::handle_pending_key))
       .flex_1()
       .min_h_0()
       .flex()
@@ -455,13 +520,41 @@ impl Render for Lens {
             ),
         )
       });
-    let right = if self.show_log && self.tab != Tab::Unpushed {
-      v_resizable("content-command-log-split")
-        .child(resizable_panel().size_range(px(320.)..Pixels::MAX).child(upper_panel))
-        .child(resizable_panel().size(px(350.)).size_range(px(200.)..px(700.)).child(div().size_full().pt_1().child(detail_panel)))
+    let sidebar_width = self.settings.splitter_size("file_sidebar_width", 320., 220. ..=600.);
+    let command_log_height = self.settings.splitter_size("command_log_height", 350., 200. ..=700.);
+    let split_view = cx.entity().downgrade();
+    let upper_workspace = h_resizable("file-content-split")
+      .on_resize({
+        let split_view = split_view.clone();
+        move |state, _, cx| {
+          let Some(size) = state.read(cx).sizes().first().map(f32::from) else { return };
+          let _ = split_view.update(cx, |this, _| {
+            this.settings.remember_splitter_size("file_sidebar_width", size);
+            this.save_settings();
+          });
+        }
+      })
+      .child(resizable_panel().visible(sidebar_visible).size(px(sidebar_width)).size_range(px(220.)..px(600.)).child(sidebar))
+      .child(resizable_panel().size_range(px(500.)..Pixels::MAX).child(upper_panel));
+    let workspace = if self.show_log && self.tab != Tab::Unpushed {
+      v_resizable("workspace-command-log-split")
+        .on_resize(move |state, _, cx| {
+          let Some(size) = state.read(cx).sizes().get(1).map(f32::from) else { return };
+          let _ = split_view.update(cx, |this, _| {
+            this.settings.remember_splitter_size("command_log_height", size);
+            this.save_settings();
+          });
+        })
+        .child(resizable_panel().size_range(px(320.)..Pixels::MAX).child(upper_workspace))
+        .child(
+          resizable_panel()
+            .size(px(command_log_height))
+            .size_range(px(200.)..px(700.))
+            .child(div().size_full().pt_1().child(detail_panel)),
+        )
         .into_any_element()
     } else {
-      upper_panel.into_any_element()
+      upper_workspace.into_any_element()
     };
     div()
       .capture_key_down(cx.listener(Self::handle_shortcut))
@@ -562,13 +655,7 @@ impl Render for Lens {
           .child(div().flex_1().min_w_0().child(self.selected_path.clone()))
           .child(div().flex().items_center().child(self.bookmark_toggle(cx)).child(self.bookmark_list(cx))),
       )
-      .child(
-        div().p_1().flex().flex_1().min_h_0().child(
-          h_resizable("file-content-split")
-            .child(resizable_panel().visible(sidebar_visible).size(px(320.)).size_range(px(220.)..px(600.)).child(sidebar))
-            .child(resizable_panel().size_range(px(500.)..Pixels::MAX).child(right)),
-        ),
-      )
+      .child(div().p_1().flex().flex_1().min_h_0().child(workspace))
       .child(
         div()
           .h(px(36.))

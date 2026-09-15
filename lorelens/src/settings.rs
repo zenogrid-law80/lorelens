@@ -25,6 +25,9 @@ pub struct Settings {
   pub cli: Option<PathBuf>,
   pub theme: String,
   pub show_command_log: bool,
+  pub window_maximized: bool,
+  pub window_fullscreen: bool,
+  pub splitter_sizes: std::collections::BTreeMap<String, f32>,
   pub auto_refresh: bool,
   pub text_line_ending: String,
   pub text_encoding: String,
@@ -57,6 +60,9 @@ impl Default for Settings {
       cli: None,
       theme: crate::theme::DEFAULT_THEME.into(),
       show_command_log: true,
+      window_maximized: false,
+      window_fullscreen: false,
+      splitter_sizes: Default::default(),
       auto_refresh: true,
       text_line_ending: "LF".into(),
       text_encoding: "UTF-8 no BOM".into(),
@@ -191,6 +197,9 @@ impl Settings {
       language: crate::i18n::normalize(data["language"].as_str().unwrap_or("en-US")).into(),
       theme: crate::theme::normalize_theme(data["theme"].as_str().unwrap_or(crate::theme::DEFAULT_THEME)).into(),
       show_command_log: data["show_command_log"].as_bool().unwrap_or(true),
+      window_maximized: data["window_maximized"].as_bool().unwrap_or(false),
+      window_fullscreen: data["window_fullscreen"].as_bool().unwrap_or(false),
+      splitter_sizes: serde_json::from_value(data.get("splitter_sizes").cloned().unwrap_or(json!({})))?,
       auto_refresh: data["auto_refresh"].as_bool().unwrap_or(true),
       text_line_ending: match data["text_line_ending"].as_str().unwrap_or("LF") {
         value @ ("LF" | "CR" | "CRLF") => value.into(),
@@ -325,6 +334,16 @@ impl Settings {
     self.recent.iter().find(|path| path.is_dir()).cloned()
   }
 
+  pub fn splitter_size(&self, key: &str, default: f32, range: std::ops::RangeInclusive<f32>) -> f32 {
+    self.splitter_sizes.get(key).copied().filter(|size| size.is_finite() && range.contains(size)).unwrap_or(default)
+  }
+
+  pub fn remember_splitter_size(&mut self, key: &str, size: f32) {
+    if size.is_finite() {
+      self.splitter_sizes.insert(key.into(), size);
+    }
+  }
+
   pub fn remember_login(&mut self, url: &str) {
     let url = url.trim();
     if url.is_empty() {
@@ -347,7 +366,7 @@ impl Settings {
       .collect();
     serde_json::to_writer_pretty(
       &mut file,
-      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "custom_tool_name": self.custom_tool_name, "custom_tool_path": self.custom_tool_path, "custom_tool_arguments": self.custom_tool_arguments, "recent": Self::normalized_recent(self.recent.clone()), "bookmarks": bookmarks, "cli": self.cli, "theme": self.theme, "show_command_log": self.show_command_log, "auto_refresh": self.auto_refresh, "text_line_ending": self.text_line_ending, "text_encoding": self.text_encoding, "text_extensions": Self::normalize_extensions(self.text_extensions.clone()), "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
+      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "custom_tool_name": self.custom_tool_name, "custom_tool_path": self.custom_tool_path, "custom_tool_arguments": self.custom_tool_arguments, "recent": Self::normalized_recent(self.recent.clone()), "bookmarks": bookmarks, "cli": self.cli, "theme": self.theme, "show_command_log": self.show_command_log, "window_maximized": self.window_maximized, "window_fullscreen": self.window_fullscreen, "splitter_sizes": self.splitter_sizes, "auto_refresh": self.auto_refresh, "text_line_ending": self.text_line_ending, "text_encoding": self.text_encoding, "text_extensions": Self::normalize_extensions(self.text_extensions.clone()), "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
     )?;
     file.sync_all()?;
     drop(file);
@@ -384,6 +403,27 @@ mod tests {
     settings.show_command_log = false;
     settings.save(&path).unwrap();
     assert!(!Settings::load(&path).unwrap().show_command_log);
+  }
+
+  #[test]
+  fn window_and_splitter_layout_survive_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    let defaults = Settings::load(&path).unwrap();
+    assert!(!defaults.window_maximized);
+    assert!(!defaults.window_fullscreen);
+    assert_eq!(defaults.splitter_size("sidebar", 320., 220. ..=600.), 320.);
+
+    let mut settings = Settings::default();
+    settings.window_maximized = true;
+    settings.window_fullscreen = true;
+    settings.remember_splitter_size("sidebar", 444.);
+    settings.save(&path).unwrap();
+    let restored = Settings::load(&path).unwrap();
+    assert!(restored.window_maximized);
+    assert!(restored.window_fullscreen);
+    assert_eq!(restored.splitter_size("sidebar", 320., 220. ..=600.), 444.);
+    assert_eq!(restored.splitter_size("sidebar", 320., 450. ..=600.), 320.);
   }
 
   #[test]

@@ -617,6 +617,8 @@ impl Lens {
   }
 
   fn remote_revision_details(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let detail_height = self.settings.splitter_size("remote_revision_detail_height", 135., 90. ..=360.);
+    let split_view = cx.entity().downgrade();
     let rgb = palette(cx);
     let selected = self.remote_history.selected_commit().filter(|_| self.connected);
     let mut files = div().id("remote-revision-files").size_full().min_h_0().overflow_y_scroll().p_2();
@@ -812,11 +814,26 @@ impl Lens {
       )
       .child(files);
     v_resizable("remote-revision-detail-split")
+      .on_resize(move |state, _, cx| {
+        let Some(size) = state.read(cx).sizes().get(1).map(f32::from) else { return };
+        let _ = split_view.update(cx, |this, _| {
+          this.settings.remember_splitter_size("remote_revision_detail_height", size);
+          this.save_settings();
+        });
+      })
       .child(resizable_panel().size_range(px(120.)..Pixels::MAX).child(file_panel))
-      .child(resizable_panel().size(px(135.)).size_range(px(90.)..px(360.)).child(details.border_t_1().border_color(rgb(BORDER))))
+      .child(
+        resizable_panel()
+          .size(px(detail_height))
+          .size_range(px(90.)..px(360.))
+          .child(details.border_t_1().border_color(rgb(BORDER))),
+      )
   }
 
   pub(super) fn render_remote_history(&mut self, window_active: bool, cx: &mut Context<Self>) -> impl IntoElement {
+    let branch_width = self.settings.splitter_size("remote_branch_width", 170., 140. ..=320.);
+    let revision_width = self.settings.splitter_size("remote_revision_width", 280., 220. ..=520.);
+    let split_view = cx.entity().downgrade();
     let rgb = palette(cx);
     let query = self.remote_history.filter.read(cx).content.to_lowercase();
     let loaded_total = self.remote_history.result.as_ref().map_or(0, |history| history.commits.len());
@@ -938,9 +955,20 @@ impl Lens {
         )
       });
     h_resizable("remote-history-pane-split")
-      .child(resizable_panel().size(px(170.)).size_range(px(140.)..px(320.)).child(self.remote_branch_tree(cx)))
+      .on_resize(move |state, _, cx| {
+        let sizes = state.read(cx).sizes();
+        let (Some(branch), Some(revision)) = (sizes.first().map(f32::from), sizes.get(2).map(f32::from)) else {
+          return;
+        };
+        let _ = split_view.update(cx, |this, _| {
+          this.settings.remember_splitter_size("remote_branch_width", branch);
+          this.settings.remember_splitter_size("remote_revision_width", revision);
+          this.save_settings();
+        });
+      })
+      .child(resizable_panel().size(px(branch_width)).size_range(px(140.)..px(320.)).child(self.remote_branch_tree(cx)))
       .child(resizable_panel().size_range(px(360.)..Pixels::MAX).child(list))
-      .child(resizable_panel().size(px(280.)).size_range(px(220.)..px(520.)).child(self.remote_revision_details(cx)))
+      .child(resizable_panel().size(px(revision_width)).size_range(px(220.)..px(520.)).child(self.remote_revision_details(cx)))
   }
 }
 

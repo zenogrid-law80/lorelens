@@ -465,8 +465,7 @@ impl Lens {
               }
               if kind == CommandKind::Commit {
                 this.message.update(cx, |input, cx| {
-                  input.reset();
-                  cx.notify();
+                  input.reset(cx);
                 });
               }
               this.refresh(cx);

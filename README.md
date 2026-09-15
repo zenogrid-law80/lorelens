@@ -2,7 +2,7 @@
 
 A local Lore VCS desktop client for Windows, built with Rust and GPUI. Its workspace, pending changes, submitted revisions, and details layout is inspired by P4V.
 
-![img.png](website/img.png)
+![img_black.png](website/img_black.png)
 
 ## License
 

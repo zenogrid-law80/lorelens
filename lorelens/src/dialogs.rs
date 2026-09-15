@@ -904,6 +904,7 @@ impl Lens {
     let collect_paths = |recursive| folder_change_paths(&self.status.changes, &targets, action, recursive);
     let direct = std::rc::Rc::new(collect_paths(false));
     let recursive_paths = std::rc::Rc::new(collect_paths(true));
+    let force_paths = std::rc::Rc::new(targets.iter().filter(|(_, directory)| *directory).map(|(path, _)| path.clone()).collect::<Vec<_>>());
     let recursive = std::rc::Rc::new(std::cell::Cell::new(None::<usize>));
     let validation = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
     let root = self.root.clone();
@@ -921,6 +922,7 @@ impl Lens {
       let paths = match recursive.get() {
         Some(0) => direct.clone(),
         Some(1) => recursive_paths.clone(),
+        Some(2) if action == "reset" => force_paths.clone(),
         _ => std::rc::Rc::new(Vec::new()),
       };
       let toggle = recursive.clone();
@@ -944,6 +946,7 @@ impl Lens {
               gpui_component::radio::RadioGroup::vertical("folder-scope")
                 .child(t("Selected folders only (direct files)"))
                 .child(t("Include all subfolders"))
+                .when(action == "reset", |group| group.child(t("Force reset selected folders")))
                 .selected_index(recursive.get())
                 .on_click(move |index, window, _| {
                   toggle.set(Some(*index));
@@ -958,9 +961,14 @@ impl Lens {
               })
               .h(px(160.)),
             )
-            .when(action == "reset", |d| {
+            .when(action == "reset" && recursive.get() != Some(2), |d| {
               d.child(t(
                 "Restore all listed files to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.",
+              ))
+            })
+            .when(action == "reset" && recursive.get() == Some(2), |d| {
+              d.child(t(
+                "Run lore reset --force for the selected folders, including folders with no Changes entries. Local files may be restored or overwritten.",
               ))
             })
             .child(error),
@@ -984,13 +992,15 @@ impl Lens {
                 || this.status.branch != branch
                 || this.status.revision != revision
                 || this.settings.identity != identity
-                || folder_change_paths(&this.status.changes, &targets, action, scope == 1) != *paths
+                || (scope != 2 && folder_change_paths(&this.status.changes, &targets, action, scope == 1) != *paths)
               {
                 *validation.borrow_mut() = "Repository state changed. Reopen this dialog.".into();
                 window.refresh();
                 return false;
               }
-              if action == "reset" {
+              if action == "reset" && scope == 2 {
+                this.command_batch(backend::force_reset_commands(&paths), title, false, true, cx);
+              } else if action == "reset" {
                 this.command_batch(backend::reset_commands(&this.root, &paths), title, false, true, cx);
               } else {
                 let mut args = vec![action.into(), "--".into()];

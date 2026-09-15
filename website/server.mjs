@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 const files = {
-  '/img.png': ['img.png', 'image/png'],
+  '/img_black.png': ['img_black.png', 'image/png'],
   '/img_white.png': ['img_white.png', 'image/png'],
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/index.html': ['index.html', 'text/html; charset=utf-8'],

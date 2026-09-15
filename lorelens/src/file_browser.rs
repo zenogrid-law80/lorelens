@@ -52,7 +52,6 @@ impl Lens {
     let rgb = palette(cx);
     let ready = !self.busy;
     let query = self.filter.read(cx).content.to_lowercase();
-    let title = self.root.file_name().unwrap_or_default().to_string_lossy().into_owned();
 
     // Repository navigation is persistent, independent of the right-hand tab.
     let mut files = div()
@@ -67,11 +66,9 @@ impl Lens {
           if this.busy {
             return;
           }
-          let query = this.filter.read(cx).content.to_lowercase();
           let visible: Vec<_> = this
             .entries
             .iter()
-            .filter(|entry| entry.path.file_name().unwrap_or_default().to_string_lossy().to_lowercase().contains(&query))
             .take(2000)
             .map(|entry| entry.path.strip_prefix(&this.root).unwrap_or(&entry.path).to_string_lossy().replace('\\', "/"))
             .collect();
@@ -96,6 +93,9 @@ impl Lens {
           return;
         }
         if key == "left" || key == "right" {
+          if !this.filter.read(cx).content.is_empty() {
+            return;
+          }
           if let Some(selected) = this.selection.current.clone() {
             let path = this.root.join(selected);
             if path.is_dir() && ((key == "right" && !this.expanded_folders.contains(&path)) || (key == "left" && this.expanded_folders.contains(&path))) {
@@ -110,11 +110,9 @@ impl Lens {
           }
           return;
         }
-        let query = this.filter.read(cx).content.to_lowercase();
         let visible: Vec<_> = this
           .entries
           .iter()
-          .filter(|entry| entry.path.file_name().unwrap_or_default().to_string_lossy().to_lowercase().contains(&query))
           .take(2000)
           .map(|entry| (entry.path.strip_prefix(&this.root).unwrap_or(&entry.path).to_string_lossy().replace('\\', "/"), entry.directory))
           .collect();
@@ -151,13 +149,7 @@ impl Lens {
       .pr(px(12.))
       .overflow_y_scroll();
     let mut count = 0;
-    for (i, entry) in self
-      .entries
-      .iter()
-      .enumerate()
-      .filter(|(_, e)| e.path.file_name().unwrap_or_default().to_string_lossy().to_lowercase().contains(&query))
-      .take(2000)
-    {
+    for (i, entry) in self.entries.iter().enumerate().take(2000) {
       count += 1;
       let relative = entry.path.strip_prefix(&self.root).unwrap_or(&entry.path).to_string_lossy().replace('\\', "/");
       let label = entry.path.file_name().unwrap_or_default().to_string_lossy().into_owned();
@@ -170,6 +162,7 @@ impl Lens {
       let directory = entry.directory;
       let depth = entry.path.strip_prefix(&self.root).unwrap_or(&entry.path).components().count().saturating_sub(1);
       let toggle_path = path.clone();
+      let searching = !query.is_empty();
       let change = self.status.changes.iter().find(|c| c.path == relative);
       let marker = change.map_or("", Change::file_marker);
       let selected = self.selection.paths.contains(&relative);
@@ -200,7 +193,7 @@ impl Lens {
               div()
                 .id(("tree-toggle", i))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                  if directory {
+                  if directory && !searching {
                     cx.stop_propagation();
                     this.toggle_tree_folder(toggle_path.clone(), cx);
                   }
@@ -208,12 +201,23 @@ impl Lens {
                 .w(px(14.))
                 .text_color(if selected { selected_foreground } else { rgb(MUTED) })
                 .when(directory, |toggle| {
-                  toggle.child(Icon::new(if self.expanded_folders.contains(&path) { IconName::ChevronDown } else { IconName::ChevronRight }).size(px(14.)))
+                  toggle.child(
+                    Icon::new(if !query.is_empty() || self.expanded_folders.contains(&path) {
+                      IconName::ChevronDown
+                    } else {
+                      IconName::ChevronRight
+                    })
+                    .size(px(14.)),
+                  )
                 }),
             )
             .child(
               Icon::new(if directory {
-                if self.expanded_folders.contains(&path) { IconName::FolderOpen } else { IconName::Folder }
+                if !query.is_empty() || self.expanded_folders.contains(&path) {
+                  IconName::FolderOpen
+                } else {
+                  IconName::Folder
+                }
               } else {
                 IconName::FileText
               })
@@ -246,16 +250,14 @@ impl Lens {
               if this.busy {
                 return;
               }
-              if directory && event.click_count() == 2 && !additive && !modifiers.shift {
+              if directory && !searching && event.click_count() == 2 && !additive && !modifiers.shift {
                 this.toggle_tree_folder(path.clone(), cx);
               } else if !directory && !additive && !modifiers.shift {
                 this.select(relative.clone(), cx);
               } else {
-                let query = this.filter.read(cx).content.to_lowercase();
                 let visible: Vec<String> = this
                   .entries
                   .iter()
-                  .filter(|entry| entry.path.file_name().unwrap_or_default().to_string_lossy().to_lowercase().contains(&query))
                   .take(2000)
                   .map(|entry| entry.path.strip_prefix(&this.root).unwrap_or(&entry.path).to_string_lossy().replace('\\', "/"))
                   .collect();
@@ -543,30 +545,6 @@ impl Lens {
               if selected_paths.len() > 1 || !selected_changes.is_empty() {
                 menu = menu.separator();
               }
-              let menu = if directory {
-                let folder_view = view.clone();
-                let folder_path = context_relative.clone();
-                let folder_root = context_root.clone();
-                let enabled = view.upgrade().is_some_and(|entity| {
-                  let lens = entity.read(cx);
-                  !lens.busy && lens.connected && lens.root == folder_root && lens.status.changes.iter().any(|c| std::path::Path::new(&c.path).starts_with(&folder_path))
-                });
-                menu
-                  .item(
-                    PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Reset folder", "reset"))
-                      .disabled(!enabled)
-                      .on_click(move |_, window, cx| {
-                        let _ = folder_view.update(cx, |this, cx| {
-                          if this.root == folder_root {
-                            this.folder_changes_dialog(vec![folder_path.clone()], "reset", window, cx);
-                          }
-                        });
-                      }),
-                  )
-                  .separator()
-              } else {
-                menu
-              };
               let menu = if !directory
                 && view.upgrade().is_some_and(|entity| {
                   let lens = entity.read(cx);
@@ -856,7 +834,7 @@ impl Lens {
               } else {
                 menu
               };
-              if !directory && view.upgrade().is_some_and(|entity| entity.read(cx).obliterate_enabled) {
+              let menu = if !directory && view.upgrade().is_some_and(|entity| entity.read(cx).obliterate_enabled) {
                 let action_view = view.clone();
                 let path = context_relative.clone();
                 let root = context_root.clone();
@@ -871,6 +849,28 @@ impl Lens {
                     }
                   });
                 }))
+              } else {
+                menu
+              };
+              if directory {
+                let folder_view = view.clone();
+                let folder_path = context_relative.clone();
+                let folder_root = context_root.clone();
+                let enabled = view.upgrade().is_some_and(|entity| {
+                  let lens = entity.read(cx);
+                  !lens.busy && lens.connected && lens.root == folder_root
+                });
+                menu.separator().item(
+                  PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Reset folder", "reset"))
+                    .disabled(!enabled)
+                    .on_click(move |_, window, cx| {
+                      let _ = folder_view.update(cx, |this, cx| {
+                        if this.root == folder_root {
+                          this.folder_changes_dialog(vec![folder_path.clone()], "reset", window, cx);
+                        }
+                      });
+                    }),
+                )
               } else {
                 menu
               }
@@ -913,46 +913,8 @@ impl Lens {
           .flex()
           .items_center()
           .gap_2()
-          .child(t("FILES")),
-      )
-      .child(div().px_3().pt_3().font_weight(FontWeight::SEMIBOLD).child(title.clone()))
-      .child(
-        div()
-          .px_3()
-          .py_2()
-          .text_size(px(12.))
-          .text_color(rgb(MUTED))
-          .overflow_hidden()
-          .text_ellipsis()
-          .child(self.root.display().to_string()),
-      )
-      .child(div().mx_3().mb_2().flex_shrink_0().child(self.filter.clone()))
-      .child(
-        div()
-          .px_3()
-          .py_2()
-          .flex()
-          .items_center()
-          .gap_2()
-          .border_b_1()
-          .border_color(rgb(BORDER))
-          .child(self.button("up", "↑", ready && self.directory != self.root).on_click(cx.listener(|this, _, _, cx| {
-            if this.busy || this.directory == this.root {
-              return;
-            }
-            if let Some(parent) = this.directory.parent() {
-              this.directory = parent.to_path_buf();
-              this.load_directory(cx);
-            }
-          })))
-          .child(
-            div()
-              .flex_1()
-              .text_size(px(11.))
-              .overflow_hidden()
-              .text_ellipsis()
-              .child(format!("/{}", self.directory.strip_prefix(&self.root).unwrap_or(&self.directory).to_string_lossy().replace('\\', "/"))),
-          ),
+          .child(t("FILES"))
+          .child(div().ml_2().flex_1().min_w_0().font_weight(FontWeight::NORMAL).text_color(rgb(TEXT)).child(self.filter.clone())),
       )
       .child(
         div()

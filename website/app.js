@@ -125,7 +125,7 @@ function updateThemeControl() {
   document.querySelectorAll('[data-theme-toggle]').forEach(button => button.setAttribute('aria-label', translated(locale, label)));
   themeColor?.setAttribute('content', theme === 'light' ? '#f6f8fb' : '#0b0e14');
   const previewImage = document.querySelector('.workspace-image');
-  if (previewImage) previewImage.src = theme === 'light' ? 'img_white.png' : 'img.png';
+  if (previewImage) previewImage.src = theme === 'light' ? 'img_white.png' : 'img_black.png';
 }
 
 document.querySelectorAll('[data-theme-toggle]').forEach(button => button.addEventListener('click', () => {

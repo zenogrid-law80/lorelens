@@ -26,6 +26,35 @@ pub fn list_tree(root: &Path, expanded: &std::collections::HashSet<PathBuf>) -> 
   walk(root, root, expanded, &mut result)?;
   Ok(result)
 }
+pub fn search_tree(root: &Path, query: &str) -> Result<Vec<Entry>, String> {
+  fn walk(root: &Path, dir: &Path, query: &str, result: &mut Vec<Entry>) -> Result<bool, String> {
+    let mut matched = false;
+    for entry in list_directory(root, dir)? {
+      let name_matches = entry.path.file_name().unwrap_or_default().to_string_lossy().to_lowercase().contains(query);
+      if entry.directory {
+        let start = result.len();
+        result.push(entry.clone());
+        let descendant_matches = walk(root, &entry.path, query, result)?;
+        if name_matches || descendant_matches {
+          matched = true;
+        } else {
+          result.truncate(start);
+        }
+      } else if name_matches {
+        result.push(entry);
+        matched = true;
+      }
+    }
+    Ok(matched)
+  }
+  let query = query.trim().to_lowercase();
+  if query.is_empty() {
+    return list_tree(root, &Default::default());
+  }
+  let mut result = Vec::new();
+  walk(root, root, &query, &mut result)?;
+  Ok(result)
+}
 pub use cli::{find_cli, run_as, run_branch_switch_skipping_unavailable, run_global};
 pub use deduplicate::{deduplicate_commands, deduplicate_files, duplicate_change_paths, duplicate_local_files};
 pub use history::{
@@ -33,7 +62,7 @@ pub use history::{
   save_revision_patch,
 };
 pub use obliterate::obliterate_args;
-pub use reset::reset_commands;
+pub use reset::{force_reset_commands, reset_commands};
 pub fn cleanup_resolved_merge(cli: &Path, root: &Path, relative: &str, identity: Option<&str>) -> Result<(), String> {
   let output = run_as(cli, root, &["status".into(), "--scan".into()], true, identity)?;
   let events = output
@@ -864,5 +893,23 @@ mod tests {
     assert_eq!(names(&root.join("src")), vec!["visible.rs"]);
     fs::remove_file(root.join(".loreignore")).unwrap();
     assert!(names(root).contains(&"hidden.LOG".to_owned()));
+  }
+
+  #[test]
+  fn recursive_search_includes_matching_files_and_their_parent_folders() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    fs::create_dir_all(root.join("Source/Nested")).unwrap();
+    fs::create_dir_all(root.join("Unrelated")).unwrap();
+    fs::write(root.join("Source/Nested/Needle.rs"), "").unwrap();
+    fs::write(root.join("Source/other.txt"), "").unwrap();
+    fs::write(root.join("Unrelated/nope.txt"), "").unwrap();
+
+    let paths = search_tree(root, "needle")
+      .unwrap()
+      .into_iter()
+      .map(|entry| entry.path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"))
+      .collect::<Vec<_>>();
+    assert_eq!(paths, ["Source", "Source/Nested", "Source/Nested/Needle.rs"]);
   }
 }

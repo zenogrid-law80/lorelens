@@ -11,6 +11,53 @@ use gpui_component::Icon;
 use gpui_kit_assets::IconName;
 use unicode_segmentation::*;
 
+/// Commit messages use the component text editor for multiline layout, IME,
+/// selection, wrapping, and scrolling. Replacements are applied during render,
+/// when a Window is available (command completion callbacks only have an App).
+pub struct CommitMessage {
+  state: Entity<gpui_component::input::TextareaState>,
+  replacement: Option<String>,
+  placeholder: String,
+}
+
+impl CommitMessage {
+  pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    let state = cx.new(|cx| gpui_component::input::TextareaState::new(window, cx).auto_grow(1, 6));
+    Self {
+      state,
+      replacement: None,
+      placeholder: String::new(),
+    }
+  }
+
+  pub fn value(&self, cx: &App) -> SharedString {
+    self.replacement.as_ref().map(|value| value.clone().into()).unwrap_or_else(|| self.state.read(cx).value())
+  }
+
+  pub fn set_value(&mut self, value: String, cx: &mut Context<Self>) {
+    self.replacement = Some(value);
+    cx.notify();
+  }
+
+  pub fn reset(&mut self, cx: &mut Context<Self>) {
+    self.set_value(String::new(), cx);
+  }
+}
+
+impl Render for CommitMessage {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    if let Some(value) = self.replacement.take() {
+      self.state.update(cx, |state, cx| state.set_value(value, window, cx));
+    }
+    let placeholder = crate::i18n::t("Describe your staged changes…");
+    if self.placeholder != placeholder {
+      self.placeholder = placeholder.clone();
+      self.state.update(cx, |state, cx| state.set_placeholder(placeholder, window, cx));
+    }
+    gpui_component::input::Textarea::new(&self.state).w_full().aria_label(crate::i18n::t("Commit message"))
+  }
+}
+
 actions!(
   text_input,
   [

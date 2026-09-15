@@ -134,6 +134,7 @@ impl Lens {
         self.entries.clear();
         self.expanded_folders.clear();
         self.collapsed_change_folders.clear();
+        self.pending_folder_focus = None;
         self.selection.clear();
         self.status = Status::default();
         self.connected = false;
@@ -148,8 +149,7 @@ impl Lens {
         self.output.clear();
         self.output_title.clear();
         self.message.update(cx, |input, cx| {
-          input.reset();
-          cx.notify();
+          input.reset(cx);
         });
         self.filter.update(cx, |input, cx| {
           input.reset();

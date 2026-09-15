@@ -86,7 +86,7 @@ impl Lens {
           ("File history", "history", file),
           ("Pending push", "pending", ready),
         ],
-        "View" => vec![("Theme…", "theme", true), ("Command log", "log", true)],
+        "View" => vec![("Theme…", "theme", true), ("Command Log and History", "log", true)],
         _ => vec![("Login…", "login", ready), ("Logout", "logout", ready)],
       };
       for (label, action, enabled) in items {
