@@ -140,12 +140,21 @@ impl Render for Lens {
       );
     }
     let pending_query = self.pending_filter.read(cx).content.to_lowercase().to_string();
+    let state_filter = self.change_state_filter;
     self.pending_visible = self
       .status
       .changes
       .iter()
       .enumerate()
-      .filter(|(_, change)| pending_query.is_empty() || change.path.to_lowercase().contains(&pending_query) || change.action.to_lowercase().contains(&pending_query))
+      .filter(|(_, change)| {
+        let text_matches = pending_query.is_empty() || change.path.to_lowercase().contains(&pending_query) || change.action.to_lowercase().contains(&pending_query);
+        let state_matches = match state_filter {
+          ChangeStateFilter::All => true,
+          ChangeStateFilter::Staged => change.staged,
+          ChangeStateFilter::Unstaged => !change.staged,
+        };
+        text_matches && state_matches
+      })
       .map(|(index, _)| index)
       .collect();
     self.pending_rows = if pending_query.is_empty() {
@@ -388,28 +397,79 @@ impl Render for Lens {
             .bg(rgb(PANEL))
             .child(self.pending_filter.clone())
             .child(
-              div().flex().items_center().gap_2().text_size(px(12.)).child(
-                gpui_component::checkbox::Checkbox::new("select-visible-changes")
-                  .label(tf("{count} changed files", &[("count", visible_count.to_string())]))
-                  .checked(all_visible_selected)
-                  .disabled(self.busy || visible_paths.is_empty())
-                  .on_click(cx.listener(move |this, checked: &bool, _, cx| {
-                    if this.busy {
-                      return;
-                    }
-                    if *checked {
-                      this.selection.select_all(&visible_paths);
-                    } else {
-                      for path in &visible_paths {
-                        this.selection.paths.remove(path);
+              div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_size(px(12.))
+                .child(
+                  gpui_component::checkbox::Checkbox::new("select-visible-changes")
+                    .label(tf("{count} changed files", &[("count", visible_count.to_string())]))
+                    .checked(all_visible_selected)
+                    .disabled(self.busy || visible_paths.is_empty())
+                    .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                      if this.busy {
+                        return;
                       }
-                      this.selection.current = this.selection.paths.iter().next().cloned();
-                      this.selection.anchor = this.selection.current.clone();
-                    }
-                    this.preview.invalidate();
-                    cx.notify();
-                  })),
-              ),
+                      if *checked {
+                        this.selection.select_all(&visible_paths);
+                      } else {
+                        for path in &visible_paths {
+                          this.selection.paths.remove(path);
+                        }
+                        this.selection.current = this.selection.paths.iter().next().cloned();
+                        this.selection.anchor = this.selection.current.clone();
+                      }
+                      this.preview.invalidate();
+                      cx.notify();
+                    })),
+                )
+                .child(div().flex_1())
+                .child(
+                  div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(div().text_size(px(11.)).text_color(rgb(MUTED)).child(t("STATE")))
+                    .child(
+                      Button::new("change-state-all")
+                        .border_0()
+                        .small()
+                        .label(t("All"))
+                        .when(self.change_state_filter == ChangeStateFilter::All, |b| b.text_color(rgb(Accent)).font_weight(FontWeight::SEMIBOLD))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                          this.change_state_filter = ChangeStateFilter::All;
+                          this.pending_folder_focus = None;
+                          cx.notify();
+                        })),
+                    )
+                    .child(div().text_color(rgb(MUTED)).child("|"))
+                    .child(
+                      Button::new("change-state-staged")
+                        .border_0()
+                        .small()
+                        .label(t("Staged"))
+                        .when(self.change_state_filter == ChangeStateFilter::Staged, |b| b.text_color(rgb(Accent)).font_weight(FontWeight::SEMIBOLD))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                          this.change_state_filter = ChangeStateFilter::Staged;
+                          this.pending_folder_focus = None;
+                          cx.notify();
+                        })),
+                    )
+                    .child(div().text_color(rgb(MUTED)).child("|"))
+                    .child(
+                      Button::new("change-state-unstaged")
+                        .border_0()
+                        .small()
+                        .label(t("Unstaged"))
+                        .when(self.change_state_filter == ChangeStateFilter::Unstaged, |b| b.text_color(rgb(Accent)).font_weight(FontWeight::SEMIBOLD))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                          this.change_state_filter = ChangeStateFilter::Unstaged;
+                          this.pending_folder_focus = None;
+                          cx.notify();
+                        })),
+                    ),
+                ),
             ),
         )
         .child(

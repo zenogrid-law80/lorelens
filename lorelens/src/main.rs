@@ -105,6 +105,14 @@ enum Tab {
   Unpushed,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum ChangeStateFilter {
+  #[default]
+  All,
+  Staged,
+  Unstaged,
+}
+
 enum DiffRetry {
   Working { root: PathBuf, path: String },
   Merge { root: PathBuf, paths: Vec<String> },
@@ -156,6 +164,7 @@ struct Lens {
   message: Entity<CommitMessage>,
   filter: Entity<TextInput>,
   pending_filter: Entity<TextInput>,
+  change_state_filter: ChangeStateFilter,
   selected_path: Entity<TextInput>,
   pending_visible: Vec<usize>,
   pending_rows: Vec<PendingTreeRow>,
@@ -474,7 +483,7 @@ impl Lens {
             output_title: "Welcome to LoreLens".into(), logs: vec![],
             message: cx.new(|cx| CommitMessage::new(window, cx)),
             pending_folder_focus: None,
-            filter, pending_filter, selected_path, pending_visible: Vec::new(), pending_rows: Vec::new(), notice: "Opening repository…".into(), error: false, show_log, obliterate_enabled: false,
+            filter, pending_filter, change_state_filter: ChangeStateFilter::All, selected_path, pending_visible: Vec::new(), pending_rows: Vec::new(), notice: "Opening repository…".into(), error: false, show_log, obliterate_enabled: false,
             settings, settings_error, branch_output: String::new(), show_branches: false,
             connect_after_load,
             startup_login_pending: false,
