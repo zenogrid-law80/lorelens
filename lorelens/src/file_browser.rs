@@ -926,22 +926,7 @@ impl Lens {
           .text_ellipsis()
           .child(self.root.display().to_string()),
       )
-      .child(
-        div()
-          .mx_3()
-          .mb_2()
-          .pl_2()
-          .flex()
-          .flex_shrink_0()
-          .items_center()
-          .bg(rgb(BG))
-          .overflow_hidden()
-          .border_1()
-          .border_color(rgb(BORDER))
-          .rounded_md()
-          .child(Icon::new(IconName::Search).size(px(16.)).text_color(rgb(MUTED)))
-          .child(div().flex_1().min_w_0().child(self.filter.clone())),
-      )
+      .child(div().mx_3().mb_2().flex_shrink_0().child(self.filter.clone()))
       .child(
         div()
           .px_3()

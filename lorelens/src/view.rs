@@ -321,19 +321,7 @@ impl Render for Lens {
             .flex_col()
             .gap_2()
             .bg(rgb(PANEL))
-            .child(
-              div()
-                .flex()
-                .items_center()
-                .pl_3()
-                .bg(rgb(BG))
-                .overflow_hidden()
-                .border_1()
-                .border_color(rgb(BORDER))
-                .rounded_md()
-                .child(Icon::new(IconName::Search).size(px(16.)).text_color(rgb(MUTED)))
-                .child(div().flex_1().min_w_0().child(self.pending_filter.clone())),
-            )
+            .child(self.pending_filter.clone())
             .child(
               div().flex().items_center().gap_2().text_size(px(12.)).child(
                 gpui_component::checkbox::Checkbox::new("select-visible-changes")
@@ -420,16 +408,7 @@ impl Render for Lens {
                   .child(div().text_size(px(11.)).text_color(rgb(MUTED)).child(t("Stage files to commit your changes."))),
               ),
             )
-            .child(
-              div()
-                .flex_1()
-                .min_w(px(160.))
-                .overflow_hidden()
-                .rounded_md()
-                .border_1()
-                .border_color(rgb(BORDER))
-                .child(self.message.clone()),
-            )
+            .child(div().flex_1().min_w(px(160.)).child(self.message.clone()))
             .child(self.button("generate-message", "Generate message", vcs && staged > 0).on_click(cx.listener(|this, _, _, cx| {
               this.generate_commit_message(cx);
             })))
@@ -569,7 +548,7 @@ impl Render for Lens {
       )
       .child(
         div()
-          .h(px(38.))
+          .h(px(46.))
           .flex_shrink_0()
           .flex()
           .items_center()
@@ -580,16 +559,7 @@ impl Render for Lens {
           .text_size(px(11.))
           .text_color(rgb(MUTED))
           .child(t("Path"))
-          .child(
-            div()
-              .flex_1()
-              .min_w_0()
-              .overflow_hidden()
-              .rounded_md()
-              .border_1()
-              .border_color(rgb(BORDER))
-              .child(self.selected_path.clone()),
-          )
+          .child(div().flex_1().min_w_0().child(self.selected_path.clone()))
           .child(div().flex().items_center().child(self.bookmark_toggle(cx)).child(self.bookmark_list(cx))),
       )
       .child(

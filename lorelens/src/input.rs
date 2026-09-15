@@ -7,6 +7,8 @@ use gpui::{
   MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, WindowBounds,
   WindowOptions, actions, black, div, fill, hsla, opaque_grey, point, prelude::*, px, relative, rgb, rgba, size, white, yellow,
 };
+use gpui_component::Icon;
+use gpui_kit_assets::IconName;
 use unicode_segmentation::*;
 
 actions!(
@@ -40,6 +42,7 @@ pub struct TextInput {
   last_bounds: Option<Bounds<Pixels>>,
   is_selecting: bool,
   read_only: bool,
+  icon: Option<IconName>,
 }
 
 pub fn init(cx: &mut App) {
@@ -72,11 +75,17 @@ impl TextInput {
       last_bounds: None,
       is_selecting: false,
       read_only: false,
+      icon: None,
     }
   }
 
   pub fn read_only(mut self) -> Self {
     self.read_only = true;
+    self
+  }
+
+  pub fn with_icon(mut self, icon: IconName) -> Self {
+    self.icon = Some(icon);
     self
   }
 }
@@ -508,10 +517,22 @@ impl Element for TextElement {
 impl Render for TextInput {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let rgb = crate::palette(cx);
+    let theme = gpui_component::Theme::global(cx);
+    let border = theme.input;
+    let ring = theme.ring;
     div()
       .flex()
+      .items_center()
+      .h(px(38.))
+      .w_full()
+      .min_w_0()
       .key_context("TextInput")
       .track_focus(&self.focus_handle(cx))
+      .border_2()
+      .border_color(border)
+      .rounded_md()
+      .overflow_hidden()
+      .focus(move |style| style.border_color(ring))
       .cursor(CursorStyle::IBeam)
       .on_action(cx.listener(Self::backspace))
       .on_action(cx.listener(Self::delete))
@@ -532,12 +553,16 @@ impl Render for TextInput {
       .on_mouse_move(cx.listener(Self::on_mouse_move))
       .bg(rgb(crate::theme::ColorRole::BG))
       .text_color(rgb(crate::theme::ColorRole::TEXT))
-      .line_height(px(30.))
+      .line_height(px(26.))
       .text_size(px(13.))
+      .when_some(self.icon, |input, icon| {
+        input.child(div().pl_2().flex_shrink_0().child(Icon::new(icon).size(px(16.)).text_color(rgb(crate::theme::ColorRole::MUTED))))
+      })
       .child(
         div()
-          .h(px(30. + 4. * 2.))
-          .w_full()
+          .h(px(26. + 4. * 2.))
+          .flex_1()
+          .min_w_0()
           .p(px(4.))
           .bg(rgb(crate::theme::ColorRole::BG))
           .child(TextElement { input: cx.entity() }),

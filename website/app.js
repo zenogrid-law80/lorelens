@@ -1,7 +1,7 @@
 const translations = {
   ko: {
     'Skip to content': '본문으로 건너뛰기', 'Language': '언어', 'Main navigation': '주요 탐색', 'Documentation navigation': '문서 탐색', 'Documentation categories': '문서 분류', 'Application menu reference': '애플리케이션 메뉴 참조', 'Lore CLI commands': 'Lore CLI 명령',
-    'View the latest LoreLens release on GitHub': 'GitHub에서 최신 LoreLens 릴리스 보기', 'Latest LoreLens release version': '최신 LoreLens 릴리스 버전', 'File browser and change details in the LoreLens desktop app': 'LoreLens 데스크톱 앱의 파일 브라우저와 변경 세부 정보', 'Copy build and launch commands': '빌드 및 실행 명령 복사',
+    'View the latest LoreLens release on GitHub': 'GitHub에서 최신 LoreLens 릴리스 보기', 'Latest LoreLens release version': '최신 LoreLens 릴리스 버전', 'File browser and change details in the LoreLens desktop app': 'LoreLens 데스크톱 앱의 파일 브라우저와 변경 세부 정보', 'Preview theme': '미리보기 테마', 'Dark': '어둡게', 'Light': '밝게', 'Switch to light theme': '라이트 테마로 전환', 'Switch to dark theme': '다크 테마로 전환', 'Copy build and launch commands': '빌드 및 실행 명령 복사',
     'Features': '기능', 'Workspace': '작업 공간', 'Get started': '시작하기', 'Docs': '문서', 'Home': '홈', 'Menu usage': '메뉴 사용법',
     'A NATIVE CLIENT FOR LORE VCS': 'LORE VCS 네이티브 클라이언트', 'Your repository,': '저장소를', 'in focus.': '한눈에.',
     'See every change. Know your next step.': '모든 변경을 확인하고 다음 작업을 바로 파악하세요.', 'Manage your Lore files, commits, and branches in one desktop app.': 'Lore 파일, 커밋, 브랜치를 하나의 데스크톱 앱에서 관리하세요.',
@@ -31,7 +31,7 @@ const translations = {
   },
   zh: {
     'Skip to content': '跳到正文', 'Language': '语言', 'Main navigation': '主导航', 'Documentation navigation': '文档导航', 'Documentation categories': '文档分类', 'Application menu reference': '应用菜单参考', 'Lore CLI commands': 'Lore CLI 命令',
-    'View the latest LoreLens release on GitHub': '在 GitHub 上查看最新 LoreLens 版本', 'Latest LoreLens release version': '最新 LoreLens 版本', 'File browser and change details in the LoreLens desktop app': 'LoreLens 桌面应用中的文件浏览器和更改详情', 'Copy build and launch commands': '复制构建和启动命令',
+    'View the latest LoreLens release on GitHub': '在 GitHub 上查看最新 LoreLens 版本', 'Latest LoreLens release version': '最新 LoreLens 版本', 'File browser and change details in the LoreLens desktop app': 'LoreLens 桌面应用中的文件浏览器和更改详情', 'Preview theme': '预览主题', 'Dark': '深色', 'Light': '浅色', 'Switch to light theme': '切换到浅色主题', 'Switch to dark theme': '切换到深色主题', 'Copy build and launch commands': '复制构建和启动命令',
     'Features': '功能', 'Workspace': '工作区', 'Get started': '开始使用', 'Docs': '文档', 'Home': '首页', 'Menu usage': '菜单使用',
     'A NATIVE CLIENT FOR LORE VCS': 'LORE VCS 原生客户端', 'Your repository,': '让您的仓库', 'in focus.': '一目了然。', 'See every change. Know your next step.': '查看每项更改，明确下一步操作。', 'Manage your Lore files, commits, and branches in one desktop app.': '在一个桌面应用中管理 Lore 文件、提交和分支。', 'Download for Windows': '下载 Windows 版', 'Explore the workspace': '浏览工作区', 'Latest release': '最新版本', 'POWERED BY LORE CLI': '由 LORE CLI 驱动',
     'LESS FRICTION. MORE CLARITY.': '减少阻碍，更加清晰。', 'Your workflow.': '您的工作流。', 'A clearer perspective.': '更清晰的视角。', 'Browse files, select changes, and bring branches together.': '浏览文件、选择更改并合并分支。', 'Everyday repository tasks in a familiar interface.': '在熟悉的界面中完成日常仓库操作。',
@@ -104,7 +104,38 @@ const browserLanguage = preferredLanguages
   .map(language => language.toLowerCase().split('-')[0])
   .find(language => supportedLanguages.includes(language));
 applyLanguage(supportedLanguages.includes(saved) ? saved : browserLanguage ?? 'en');
-document.querySelectorAll('[data-language]').forEach(select => select.addEventListener('change', event => applyLanguage(event.target.value, true)));
+document.querySelectorAll('[data-language]').forEach(select => select.addEventListener('change', event => {
+  applyLanguage(event.target.value, true);
+  updateThemeControl();
+}));
+
+const themeStorageKey = 'lorelens.website.theme';
+const themeColor = document.querySelector('meta[name="theme-color"]');
+const systemTheme = window.matchMedia('(prefers-color-scheme: light)');
+
+function activeTheme() {
+  return document.documentElement.dataset.theme || (systemTheme.matches ? 'light' : 'dark');
+}
+
+function updateThemeControl() {
+  const theme = activeTheme();
+  const nextTheme = theme === 'dark' ? 'light' : 'dark';
+  const label = nextTheme === 'light' ? 'Switch to light theme' : 'Switch to dark theme';
+  const locale = document.documentElement.lang.slice(0, 2);
+  document.querySelectorAll('[data-theme-toggle]').forEach(button => button.setAttribute('aria-label', translated(locale, label)));
+  themeColor?.setAttribute('content', theme === 'light' ? '#f6f8fb' : '#0b0e14');
+  const previewImage = document.querySelector('.workspace-image');
+  if (previewImage) previewImage.src = theme === 'light' ? 'img_white.png' : 'img.png';
+}
+
+document.querySelectorAll('[data-theme-toggle]').forEach(button => button.addEventListener('click', () => {
+  const theme = activeTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem(themeStorageKey, theme); } catch { /* The theme still applies when storage is unavailable. */ }
+  updateThemeControl();
+}));
+systemTheme.addEventListener?.('change', updateThemeControl);
+updateThemeControl();
 
 document.querySelector('#copy')?.addEventListener('click', async () => {
   const status = document.querySelector('#copy-status');

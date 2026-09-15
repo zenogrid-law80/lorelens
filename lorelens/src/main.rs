@@ -451,9 +451,9 @@ impl Lens {
     i18n::set_locale(&settings.language);
     let show_log = settings.show_command_log;
     let connect_after_load = backend::is_repository(&root);
-    let filter = cx.new(|cx| TextInput::new("Filter files…", cx));
+    let filter = cx.new(|cx| TextInput::new("Filter files…", cx).with_icon(IconName::Search));
     cx.observe(&filter, |_, _, cx| cx.notify()).detach();
-    let pending_filter = cx.new(|cx| TextInput::new("Filter changes…", cx));
+    let pending_filter = cx.new(|cx| TextInput::new("Filter changes…", cx).with_icon(IconName::Search));
     cx.observe(&pending_filter, |_, _, cx| cx.notify()).detach();
     let selected_path = cx.new(|cx| TextInput::new("", cx).read_only());
     let mut view = Self {

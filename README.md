@@ -4,6 +4,11 @@ A local Lore VCS desktop client for Windows, built with Rust and GPUI. Its works
 
 ![img.png](website/img.png)
 
+## License
+
+LoreLens is licensed under the [MIT License](LICENSE).
+Third-party components retain their respective licenses; see [Third-party notices](THIRD_PARTY_NOTICES.md).
+
 ## Running
 
 Requires stable Rust and the Visual Studio C++ Build Tools / Windows SDK.

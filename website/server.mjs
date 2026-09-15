@@ -2,11 +2,12 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 const files = {
   '/img.png': ['img.png', 'image/png'],
+  '/img_white.png': ['img_white.png', 'image/png'],
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/index.html': ['index.html', 'text/html; charset=utf-8'],
   '/styles.css': ['styles.css', 'text/css; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
-  '/favicon.ico': ['favicon.ico', 'image/x-icon'],
+  '/favicon.svg': ['favicon.svg', 'image/svg+xml'],
   '/docs/api/': ['docs/api/index.html', 'text/html; charset=utf-8'],
   '/docs/api/index.html': ['docs/api/index.html', 'text/html; charset=utf-8'],
   '/docs/docs.css': ['docs/docs.css', 'text/css; charset=utf-8'],

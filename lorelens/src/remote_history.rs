@@ -405,7 +405,7 @@ impl Lens {
       .flex()
       .flex_col()
       .bg(rgb(PANEL))
-      .child(div().h(px(36.)).p_1().flex_shrink_0().child(self.remote_history.branch_filter.clone()))
+      .child(div().p_1().flex_shrink_0().child(self.remote_history.branch_filter.clone()))
       .child(
         div()
           .id("history-branch-tree")
@@ -862,8 +862,8 @@ impl Lens {
       .flex_col()
       .child(
         div()
-          .h(px(36.))
-          .px_1()
+          .min_h(px(46.))
+          .p_1()
           .flex()
           .items_center()
           .gap_2()
