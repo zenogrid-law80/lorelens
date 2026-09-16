@@ -22,6 +22,20 @@ bash packaging/build-dmg.sh
 
 # MSI 패키지 만들기
 
+# 최신 LoreLens 설치
+
+인터넷에서 최신 안정 버전 MSI를 내려받아 설치하려면 PowerShell에서 실행합니다.
+
+```powershell
+.\packaging\install-lorelens.ps1
+```
+
+무인 설치는 다음과 같이 실행합니다.
+
+```powershell
+.\packaging\install-lorelens.ps1 -Silent
+```
+
 PowerShell에서 프로젝트 루트 기준으로 실행합니다.
 
 ```powershell

@@ -374,6 +374,7 @@
   "Unstage…": "取消暂存…",
   "Revert file…": "还原文件…",
   "Revert file": "还原文件",
+  "Unstage staged files and restore unstaged files? Local edits to unstaged files will be lost; newly added files will be deleted.": "要取消暂存已暂存文件并还原未暂存文件吗？未暂存文件的本地修改将丢失，新添加的文件将被删除。",
   "Remove this file from staging? Local file changes will be kept.": "要取消暂存此文件吗？本地文件更改将被保留。",
   "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.": "要将此文件还原到当前已提交的修订吗？已删除的文件将恢复，暂存的更改将被丢弃。本地修改将丢失，新添加的文件将被删除。",
   "Create repository…": "创建仓库…",

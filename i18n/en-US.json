@@ -374,6 +374,7 @@
   "Unstage…": "Unstage…",
   "Revert file…": "Revert file…",
   "Revert file": "Revert file",
+  "Unstage staged files and restore unstaged files? Local edits to unstaged files will be lost; newly added files will be deleted.": "Unstage staged files and restore unstaged files? Local edits to unstaged files will be lost; newly added files will be deleted.",
   "Remove this file from staging? Local file changes will be kept.": "Remove this file from staging? Local file changes will be kept.",
   "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.": "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted.",
   "Create repository…": "Create repository…",

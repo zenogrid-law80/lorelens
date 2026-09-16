@@ -1240,7 +1240,7 @@ impl Lens {
           cx.notify();
         }))
         .context_menu(move |mut menu, _, cx| {
-          let Some((paths, stage_paths, unstage_paths, diff_path, resolve_path, context_file, context_exists, revert, ready, enabled)) = view.upgrade().and_then(|entity| {
+          let Some((paths, stage_paths, diff_path, resolve_path, context_file, context_exists, ready, enabled)) = view.upgrade().and_then(|entity| {
             let lens = entity.read(cx);
             if lens.root != context_root {
               return None;
@@ -1248,8 +1248,6 @@ impl Lens {
             let use_selection = lens.selection.paths.contains(&context_path);
             let mut paths = Vec::new();
             let mut stage_paths = Vec::new();
-            let mut unstage_paths = Vec::new();
-            let mut revert = false;
             for change in &lens.status.changes {
               if !(if use_selection {
                 lens.selection.paths.contains(&change.path)
@@ -1259,12 +1257,9 @@ impl Lens {
                 continue;
               }
               paths.push(change.path.clone());
-              if change.staged {
-                unstage_paths.push(change.path.clone());
-              } else if !change.conflict {
+              if !change.staged && !change.conflict {
                 stage_paths.push(change.path.clone());
               }
-              revert |= change.staged || change.file_marker() == "M" || matches!(change.action.as_str(), "modify" | "remove" | "delete");
             }
             if paths.is_empty() {
               return None;
@@ -1289,19 +1284,7 @@ impl Lens {
               .all(|change| !matches!(change.node_type.to_ascii_lowercase().as_str(), "directory" | "folder"))
               && !lens.root.join(&context_path).is_dir();
             let context_exists = matches!(lens.root.join(&context_path).try_exists(), Ok(true));
-            let revert = revert || paths.len() > 1 || matches!(lens.root.join(&paths[0]).try_exists(), Ok(false));
-            Some((
-              paths,
-              stage_paths,
-              unstage_paths,
-              diff_path,
-              resolve_path,
-              context_file,
-              context_exists,
-              revert,
-              !lens.busy,
-              !lens.busy && lens.connected,
-            ))
+            Some((paths, stage_paths, diff_path, resolve_path, context_file, context_exists, !lens.busy, !lens.busy && lens.connected))
           }) else {
             return menu;
           };
@@ -1310,15 +1293,6 @@ impl Lens {
           selected_paths.sort();
           selected_paths.dedup();
           let single_file = selected_paths.len() == 1 && context_file;
-          let delete_allowed = view.upgrade().is_some_and(|entity| {
-            let lens = entity.read(cx);
-            lens.root == context_root
-              && !lens
-                .status
-                .changes
-                .iter()
-                .any(|change| selected_paths.iter().any(|path| same_change_path(&change.path, path)) && is_staged_modification(change))
-          });
           if view
             .upgrade()
             .is_some_and(|entity| backend::duplicate_change_paths(&entity.read(cx).status.changes).contains(&context_path))
@@ -1398,69 +1372,29 @@ impl Lens {
                 }),
             );
           }
-          for unstage_only in [true, false] {
-            if (unstage_only && unstage_paths.is_empty()) || (!unstage_only && (single_file || !revert)) {
-              continue;
-            }
-            let view = view.clone();
-            let paths = if unstage_only { unstage_paths.clone() } else { paths.clone() };
-            let root = context_root.clone();
-            menu = menu.item(
-              PopupMenuItem::new(shortcuts::shortcut_label(
-                &shortcut_settings,
-                if unstage_only {
-                  "Unstage…"
-                } else if paths.len() > 1 {
-                  "Revert selected files"
-                } else {
-                  "Revert file…"
-                },
-                if unstage_only { "unstage" } else { "revert" },
-              ))
-              .disabled(!enabled)
-              .on_click(move |_, window, cx| {
-                let _ = view.update(cx, |this, cx| {
-                  if this.root == root {
-                    this.revert_dialog(paths.clone(), unstage_only, window, cx);
-                  }
-                });
-              }),
-            );
-          }
+          let revert_view = view.clone();
+          let revert_root = context_root.clone();
+          let revert_paths = paths.clone();
+          menu = menu.item(
+            PopupMenuItem::new(shortcuts::shortcut_label(
+              &shortcut_settings,
+              if selected_paths.len() > 1 { "Revert selected files" } else { "Revert file…" },
+              "revert",
+            ))
+            .disabled(!enabled)
+            .on_click(move |_, window, cx| {
+              let _ = revert_view.update(cx, |this, cx| {
+                if this.root == revert_root {
+                  this.changes_revert_dialog(revert_paths.clone(), window, cx);
+                }
+              });
+            }),
+          );
           if selected_paths.len() > 1 {
             let copy_paths = selected_paths.iter().map(|path| context_root.join(path).to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
-            let delete_sources = selected_paths
-              .iter()
-              .map(|path| context_root.join(path))
-              .filter(|path| matches!(path.try_exists(), Ok(true)))
-              .collect::<Vec<_>>();
-            let delete_enabled = ready && !delete_sources.is_empty();
             menu = menu.separator().item(PopupMenuItem::new(t("Copy selected full paths")).on_click(move |_, _, cx| {
               cx.write_to_clipboard(ClipboardItem::new_string(copy_paths.clone()));
             }));
-            if delete_allowed {
-              let delete_view = view.clone();
-              let delete_root = context_root.clone();
-              let delete_paths = selected_paths.clone();
-              menu = menu.item(
-                PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Delete…", "delete"))
-                  .disabled(!delete_enabled)
-                  .on_click(move |_, window, cx| {
-                    let _ = delete_view.update(cx, |this, cx| {
-                      if !this.busy
-                        && this.root == delete_root
-                        && !this
-                          .status
-                          .changes
-                          .iter()
-                          .any(|change| delete_paths.iter().any(|path| same_change_path(&change.path, path)) && is_staged_modification(change))
-                      {
-                        this.delete_files_dialog(delete_sources.clone(), window, cx);
-                      }
-                    });
-                  }),
-              );
-            }
           } else if single_file {
             let absolute_path = context_root.join(&context_path);
             let move_view = view.clone();
@@ -1601,31 +1535,6 @@ impl Lens {
                 )
                 .separator();
             }
-            if delete_allowed {
-              let delete_view = view.clone();
-              let delete_root = context_root.clone();
-              let delete_relative = context_path.clone();
-              let delete_path = absolute_path;
-              menu = menu.item(
-                PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Delete…", "delete"))
-                  .disabled(!ready || !context_exists)
-                  .on_click(move |_, window, cx| {
-                    let _ = delete_view.update(cx, |this, cx| {
-                      if !this.busy
-                        && this.root == delete_root
-                        && matches!(delete_path.try_exists(), Ok(true))
-                        && !this
-                          .status
-                          .changes
-                          .iter()
-                          .any(|change| same_change_path(&change.path, &delete_relative) && is_staged_modification(change))
-                      {
-                        this.delete_dialog(delete_path.clone(), window, cx);
-                      }
-                    });
-                  }),
-              );
-            }
           }
           // Obliterate resolves the current/staged node. Untracked additions and
           // staged deletions have no eligible node to remove.
@@ -1662,22 +1571,7 @@ impl Lens {
               });
             }));
           }
-          let reset_view = view.clone();
-          let reset_root = context_root.clone();
-          let mut reset_paths = paths;
-          reset_paths.sort();
-          reset_paths.dedup();
-          menu.separator().item(
-            PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Reset…", "reset"))
-              .disabled(!enabled)
-              .on_click(move |_, window, cx| {
-                let _ = reset_view.update(cx, |this, cx| {
-                  if this.root == reset_root {
-                    this.reset_dialog(reset_paths.clone(), window, cx);
-                  }
-                });
-              }),
-          )
+          menu
         }),
     )
   }

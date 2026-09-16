@@ -1,5 +1,18 @@
 use super::*;
 
+fn changes_revert_targets(changes: &[Change], paths: &[String]) -> (Vec<String>, Vec<String>) {
+  let mut unstage = Vec::new();
+  let mut reset = Vec::new();
+  for path in paths {
+    if changes.iter().any(|change| change.path == *path && change.staged) {
+      unstage.push(path.clone());
+    } else if changes.iter().any(|change| change.path == *path) {
+      reset.push(path.clone());
+    }
+  }
+  (unstage, reset)
+}
+
 fn conflict_file_name(path: &str) -> &str {
   path.rsplit(['/', '\\']).next().unwrap_or(path)
 }
@@ -1220,8 +1233,91 @@ impl Lens {
     self.file_changes_dialog(paths, unstage_only, title, window, cx);
   }
 
-  pub(super) fn reset_dialog(&mut self, paths: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
-    self.file_changes_dialog(paths, false, "Reset files", window, cx);
+  pub(super) fn changes_revert_dialog(&mut self, mut paths: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+    paths.sort();
+    paths.dedup();
+    if self.busy || !self.connected || !self.pending_paths_valid(&paths, None) {
+      return;
+    }
+    let (unstage_paths, reset_paths) = changes_revert_targets(&self.status.changes, &paths);
+    if reset_paths.is_empty() {
+      self.revert_dialog(unstage_paths, true, window, cx);
+      return;
+    }
+    let root = self.root.clone();
+    let revision = self.status.revision.clone();
+    let branch = self.status.branch.clone();
+    let view = cx.entity().downgrade();
+    let validation = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+    window.open_dialog(cx, move |dialog, _, _| {
+      let paths = paths.clone();
+      let unstage_paths = unstage_paths.clone();
+      let reset_paths = reset_paths.clone();
+      let root = root.clone();
+      let revision = revision.clone();
+      let branch = branch.clone();
+      let view = view.clone();
+      let validation = validation.clone();
+      let error = t(&validation.borrow());
+      let title = if paths.len() > 1 { "Revert selected files" } else { "Revert file" };
+      dialog
+        .title(t(title))
+        .close_button(false)
+        .overlay_closable(false)
+        .footer(dialog_footer("revert-confirm", t(title), true))
+        .child(
+          div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(root.display().to_string())
+            .child(tf("{count} items selected", &[("count", paths.len().to_string())]))
+            .child(
+              div()
+                .id("revert-paths")
+                .max_h(px(240.))
+                .overflow_y_scroll()
+                .children(paths.iter().map(|path| div().child(path.clone()))),
+            )
+            .child(t(if !unstage_paths.is_empty() {
+              "Unstage staged files and restore unstaged files? Local edits to unstaged files will be lost; newly added files will be deleted."
+            } else if paths.len() > 1 {
+              "Restore all listed files to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted."
+            } else {
+              "Restore this file to the current committed revision? Deleted files will be restored and staged changes discarded. Local edits will be lost; newly added files will be deleted."
+            }))
+            .child(error),
+        )
+        .on_ok(move |_, window, cx| {
+          view
+            .update(cx, |this, cx| {
+              let current_targets = changes_revert_targets(&this.status.changes, &paths);
+              if this.busy
+                || !this.connected
+                || this.root != root
+                || this.status.branch != branch
+                || this.status.revision != revision
+                || !this.pending_paths_valid(&paths, None)
+                || current_targets != (unstage_paths.clone(), reset_paths.clone())
+              {
+                *validation.borrow_mut() = "Repository state changed. Reopen this dialog.".into();
+                window.refresh();
+                return false;
+              }
+              let mut commands = Vec::new();
+              if !unstage_paths.is_empty() {
+                let mut unstage = vec!["unstage".into(), "--".into()];
+                unstage.extend(unstage_paths.iter().cloned());
+                commands.push(unstage);
+              }
+              commands.extend(backend::reset_commands(&this.root, &reset_paths));
+              this.selection.clear();
+              this.command_batch(commands, title, false, true, cx);
+              true
+            })
+            .unwrap_or(true)
+        })
+    });
   }
 
   fn file_changes_dialog(&mut self, mut paths: Vec<String>, unstage_only: bool, title: &'static str, window: &mut Window, cx: &mut Context<Self>) {
@@ -1979,8 +2075,34 @@ fn folder_change_paths(changes: &[Change], targets: &[(String, bool)], action: &
 #[cfg(test)]
 mod folder_scope_tests {
   use super::{
-    Change, ConflictDialogEntry, ConflictFilter, ConflictSort, conflict_file_name, conflict_matches_filter, folder_change_paths, select_conflict_path, sort_conflict_entries, valid_lore_remote,
+    Change, ConflictDialogEntry, ConflictFilter, ConflictSort, changes_revert_targets, conflict_file_name, conflict_matches_filter, folder_change_paths, select_conflict_path, sort_conflict_entries,
+    valid_lore_remote,
   };
+
+  #[test]
+  fn changes_revert_unstages_staged_paths_and_resets_unstaged_paths() {
+    let changes = [
+      ("staged-add", "add", true),
+      ("staged-modify", "modify", true),
+      ("new-file", "add", false),
+      ("modified-file", "modify", false),
+      ("removed-file", "remove", false),
+      ("both", "remove", true),
+      ("both", "add", false),
+    ]
+    .into_iter()
+    .map(|(path, action, staged)| Change {
+      path: path.into(),
+      action: action.into(),
+      staged,
+      ..Default::default()
+    })
+    .collect::<Vec<_>>();
+    let paths = ["staged-add", "staged-modify", "new-file", "modified-file", "removed-file", "both"].map(str::to_owned);
+    let (unstage, reset) = changes_revert_targets(&changes, &paths);
+    assert_eq!(unstage, ["staged-add", "staged-modify", "both"]);
+    assert_eq!(reset, ["new-file", "modified-file", "removed-file"]);
+  }
 
   #[test]
   fn lore_remote_validation_requires_the_secure_lore_scheme() {

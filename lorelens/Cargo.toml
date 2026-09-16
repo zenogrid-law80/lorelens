@@ -1,6 +1,6 @@
 [package]
 name = "lorelens"
-version = "0.1.26"
+version = "0.1.27"
 edition = "2024"
 description = "Lore desktop client built with GPUI"
 license = "MIT"
@@ -25,3 +25,4 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 
 [build-dependencies]
 winresource = "0.1"
+

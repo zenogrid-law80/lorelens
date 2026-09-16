@@ -217,7 +217,7 @@ impl Lens {
           return;
         }
         if id == "revert" {
-          self.revert_dialog(paths, false, window, cx);
+          self.changes_revert_dialog(paths, window, cx);
         } else {
           if self.status.changes.iter().any(|change| {
             is_staged_modification(change)
