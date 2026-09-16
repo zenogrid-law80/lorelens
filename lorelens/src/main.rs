@@ -681,7 +681,7 @@ impl Lens {
             this.notice = tf("{count} entries · local filesystem", &[("count", this.entries.len().to_string())]);
             if this.connect_after_load {
               this.connect_after_load = false;
-              this.command(vec!["status".into()], "Repository status", true, false, cx);
+              this.command(vec!["status".into(), "--scan".into()], "Repository status", true, false, cx);
             }
           }
           Err(e) => {

@@ -36,31 +36,23 @@ pub fn find_cli() -> PathBuf {
 }
 
 pub fn run_as(cli: &Path, root: &Path, args: &[String], json: bool, identity: Option<&str>) -> Result<String, String> {
-  run_with_repository_context(cli, root, args, json, identity, true)
+  run_with_repository_context(cli, root, args, json, identity)
 }
 
-pub fn run_global(cli: &Path, root: &Path, args: &[String], json: bool, identity: Option<&str>) -> Result<String, String> {
-  run_with_repository_context(cli, root, args, json, identity, false)
-}
-
-fn run_with_repository_context(cli: &Path, root: &Path, args: &[String], json: bool, identity: Option<&str>, include_repository: bool) -> Result<String, String> {
+fn run_with_repository_context(cli: &Path, root: &Path, args: &[String], json: bool, identity: Option<&str>) -> Result<String, String> {
   #[cfg(windows)]
   let canonical_args = canonicalize_change_paths(root, args)?;
   #[cfg(windows)]
   let args = canonical_args.as_slice();
   let mut command = Command::new(cli);
-  let global_working_directory = std::env::temp_dir();
-  let working_directory = if include_repository { root } else { global_working_directory.as_path() };
   command
-    .current_dir(working_directory)
+    .current_dir(root)
     .args(["--no-pager", "--non-interactive"])
     .env("NO_COLOR", "1")
     .stdin(Stdio::null())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
-  // Global authentication commands must run outside a repository so Lore cannot
-  // auto-discover a stale repository identity while selecting the new account.
-  if include_repository && is_repository(root) && args.first().is_none_or(|arg| arg != "clone") && !args.iter().any(|arg| arg == "--repository") {
+  if is_repository(root) && args.first().is_none_or(|arg| arg != "clone") && !args.iter().any(|arg| arg == "--repository") {
     command.arg("--repository").arg(root);
   }
   if json {
@@ -135,7 +127,7 @@ fn run_with_repository_context(cli: &Path, root: &Path, args: &[String], json: b
     {
       let retry = vec!["file".into(), "obliterate".into(), "--address".into(), address.to_owned()];
       let command = format!("lore file obliterate --address {address}");
-      return match run_with_repository_context(cli, root, &retry, json, identity, include_repository) {
+      return match run_with_repository_context(cli, root, &retry, json, identity) {
         Ok(output) => Ok(format!("{error}\n\nFallback: {command}\n{output}")),
         Err(retry_error) => Err(format!("{error}\n\nFallback failed: {command}\n{retry_error}")),
       };

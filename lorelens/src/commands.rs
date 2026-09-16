@@ -139,7 +139,7 @@ impl Lens {
       self.silent_refresh = silent && self.busy;
       return;
     }
-    self.command_with_mode(vec!["status".into()], "Repository status", true, false, silent, cx);
+    self.command_with_mode(vec!["status".into(), "--scan".into()], "Repository status", true, false, silent, cx);
   }
 
   pub(super) fn command(&mut self, args: Vec<String>, title: &str, status: bool, mutation: bool, cx: &mut Context<Self>) {
@@ -193,7 +193,6 @@ impl Lens {
     let authentication = kind.is_authentication();
     let login = kind == CommandKind::Login;
     let login_remote = if login { args.get(1).cloned() } else { None };
-    let login_remote_for_lookup = login_remote.clone();
     let branches = kind == CommandKind::ListBranches;
     let task = cx.background_executor().spawn(async move {
       let (reset_placeholders, prepare_error) = if resets_files {
@@ -237,17 +236,7 @@ impl Lens {
         Err,
       );
       let result = if login {
-        result.and_then(|login_output| {
-          (|| {
-            let remote = login_remote_for_lookup.as_deref().ok_or("Login server URL is missing")?;
-            let identities = backend::run_global(&cli, &root, &["auth".into(), "list".into()], true, None)?;
-            let id = backend::login_identity(&identities, remote)?;
-            let account = backend::run_global(&cli, &root, &["auth".into(), "info".into(), id.clone()], true, Some(&id))?;
-            backend::parse_account(&account)?;
-            Ok(format!("{}\n{}", login_output.trim_end(), account.trim_start()))
-          })()
-          .map_err(|error: String| format!("[login-connection] {error}"))
-        })
+        result.and_then(|output| backend::parse_account(&output).map(|_| output).map_err(|error| format!("[login-connection] {error}")))
       } else {
         result
       };
