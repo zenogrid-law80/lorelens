@@ -298,6 +298,7 @@
   "{count} items selected": "已选择 {count} 个项目",
   "Select all files in folder": "选择文件夹中的所有文件",
   "Diff": "差异",
+  "Diff with current revision": "与当前修订版比较",
   "Stage file": "暂存文件",
   "Unstage file": "取消暂存文件",
   "Discard": "放弃更改",

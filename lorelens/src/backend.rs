@@ -385,28 +385,6 @@ fn parse_revision_history(output: &str) -> Result<Vec<LocalCommit>, String> {
   Ok(revisions)
 }
 
-pub fn parse_lock_status(output: &str) -> Result<bool, String> {
-  let mut count = None;
-  let mut complete = false;
-  for line in output.lines().filter(|line| !line.trim().is_empty()) {
-    let event: Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
-    match event["tagName"].as_str() {
-      Some("lockFileStatusBegin") => count = event["data"]["count"].as_u64(),
-      Some("complete") => {
-        if event["data"]["status"].as_i64() != Some(0) {
-          return Err(event["data"].to_string());
-        }
-        complete = true;
-      }
-      _ => {}
-    }
-  }
-  if !complete {
-    return Err("Lock status did not complete.".into());
-  }
-  count.map(|count| count > 0).ok_or_else(|| "Missing lock status.".into())
-}
-
 pub fn parse_locked_paths(output: &str) -> Result<std::collections::HashSet<String>, String> {
   let mut paths = std::collections::HashSet::new();
   let mut complete = false;
@@ -723,16 +701,6 @@ mod tests {
     );
     assert!(parse_account(info).is_err());
     assert!(parse_account(&format!("{info}\n{{\"tagName\":\"complete\",\"data\":{{\"status\":1}}}}")).is_err());
-  }
-  #[test]
-  fn lock_status_requires_success_and_explicit_count() {
-    for (count, locked) in [(0, false), (1, true)] {
-      let output = format!("{{\"tagName\":\"lockFileStatusBegin\",\"data\":{{\"count\":{count}}}}}\n{{\"tagName\":\"complete\",\"data\":{{\"status\":0}}}}");
-      assert_eq!(parse_lock_status(&output), Ok(locked));
-    }
-    assert!(parse_lock_status("").is_err());
-    assert!(parse_lock_status("{\"tagName\":\"complete\",\"data\":{\"status\":0}}").is_err());
-    assert!(parse_lock_status("{\"tagName\":\"lockFileStatusBegin\",\"data\":{\"count\":0}}\n{\"tagName\":\"complete\",\"data\":{\"status\":1}}").is_err());
   }
   #[test]
   #[ignore = "Requires a built Lore CLI; creates an isolated repository under target"]

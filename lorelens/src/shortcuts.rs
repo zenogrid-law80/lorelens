@@ -15,7 +15,6 @@ const COMMANDS: &[(&str, &str, &str, bool)] = &[
   ("push", "Push", "Ctrl+Shift+P", true),
   ("history", "File history", "Ctrl+Shift+H", true),
   ("diff", "Diff", "Ctrl+Shift+D", true),
-  ("lock", "Lock", "Ctrl+L", true),
   ("bookmark", "Bookmark", "Ctrl+B", true),
   ("terminal", "Open Command Window Here", "Ctrl+H", true),
   ("reveal", "Show in Explorer", "Ctrl+I", true),
@@ -88,7 +87,17 @@ impl Lens {
       "commit" => self.connected && self.status.changes.iter().any(|change| change.staged),
       "sync" | "push" => self.connected,
       "bookmark" | "terminal" | "reveal" => self.selection.current.is_some(),
-      "stage" | "unstage" | "history" | "diff" | "delete" | "revert" | "lock" => self.connected && self.selection.current.is_some(),
+      "diff" => {
+        self.connected
+          && self.selection.current.as_ref().is_some_and(|path| {
+            self
+              .status
+              .changes
+              .iter()
+              .any(|change| change.path == *path && (change.conflict || (is_modified_change(change) && !self.root.join(path).is_dir())))
+          })
+      }
+      "stage" | "unstage" | "history" | "delete" | "revert" => self.connected && self.selection.current.is_some(),
       _ => false,
     }
   }
@@ -194,19 +203,6 @@ impl Lens {
       "commit" => self.commit_staged(cx),
       "sync" => self.command(vec!["sync".into()], "Sync", false, true, cx),
       "push" => self.command(vec!["push".into()], "Push", false, true, cx),
-      "lock" => {
-        let Some(path) = self.selection.current.clone() else {
-          return;
-        };
-        let locked = self.locked_paths.contains(&path);
-        self.command(
-          vec!["lock".into(), if locked { "release" } else { "acquire" }.into(), "--".into(), path],
-          if locked { "Unlock" } else { "Lock" },
-          false,
-          true,
-          cx,
-        );
-      }
       "revert" | "delete" => {
         let mut paths: Vec<_> = self.selection.paths.iter().cloned().collect();
         if paths.is_empty() {

@@ -298,6 +298,7 @@
   "{count} items selected": "{count} items selected",
   "Select all files in folder": "Select all files in folder",
   "Diff": "Diff",
+  "Diff with current revision": "Diff with current revision",
   "Stage file": "Stage file",
   "Unstage file": "Unstage file",
   "Discard": "Discard",

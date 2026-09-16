@@ -81,6 +81,14 @@ fn is_staged_modification(change: &Change) -> bool {
   change.staged && !matches!(action.as_str(), "add" | "create" | "remove" | "delete")
 }
 
+fn change_action_label(action: &str) -> &str {
+  if action.eq_ignore_ascii_case("keep") { "modify" } else { action }
+}
+
+fn is_modified_change(change: &Change) -> bool {
+  !change.conflict && matches!(change.action.to_ascii_lowercase().as_str(), "keep" | "modify" | "edit")
+}
+
 fn same_change_path(left: &str, right: &str) -> bool {
   let left = left.replace('\\', "/");
   let right = right.replace('\\', "/");
@@ -297,11 +305,7 @@ impl Lens {
   }
 
   fn external_diff(&mut self, path: String, cx: &mut Context<Self>) {
-    if self.busy || !self.connected || self.root.join(&path).is_dir() {
-      return;
-    }
-    if self.status.changes.iter().any(|change| change.path == path && change.conflict) {
-      self.external_merge(vec![path], cx);
+    if self.busy || !self.connected || self.root.join(&path).is_dir() || !self.status.changes.iter().any(|change| change.path == path && is_modified_change(change)) {
       return;
     }
     let root = self.root.clone();
@@ -802,7 +806,11 @@ impl Lens {
     }
     if command == "diff" {
       if let Some(path) = self.selection.current.clone() {
-        self.resolve_or_diff(path, window, cx);
+        if self.status.changes.iter().any(|change| change.path == path && change.conflict) {
+          self.resolve_or_diff(path, window, cx);
+        } else {
+          self.external_diff(path, cx);
+        }
       }
       return;
     }
@@ -1111,22 +1119,11 @@ impl Lens {
             );
           }
           let absolute_path = context_root.join(&context_path);
-          let move_view = view.clone();
-          let move_root = context_root.clone();
-          let move_path = absolute_path.clone();
           let copy_path = absolute_path.clone();
           let reveal_path = absolute_path.clone();
           let terminal_path = absolute_path.clone();
           let terminal_view = view.clone();
           menu = menu
-            .separator()
-            .item(PopupMenuItem::new(t("Move…")).disabled(!ready || !exists).on_click(move |_, window, cx| {
-              let _ = move_view.update(cx, |this, cx| {
-                if !this.busy && this.root == move_root && matches!(move_path.try_exists(), Ok(true)) {
-                  this.move_dialog(move_path.clone(), window, cx);
-                }
-              });
-            }))
             .separator()
             .item(PopupMenuItem::new(t("Copy full path")).on_click(move |_, _, cx| {
               cx.write_to_clipboard(ClipboardItem::new_string(copy_path.to_string_lossy().into_owned()));
@@ -1268,7 +1265,7 @@ impl Lens {
               .status
               .changes
               .iter()
-              .find(|change| change.path == context_path && change.file_marker() == "M" && !lens.root.join(&change.path).is_dir())
+              .find(|change| change.path == context_path && is_modified_change(change) && !lens.root.join(&change.path).is_dir())
               .map(|change| change.path.clone());
             let resolve_path = lens
               .status
@@ -1342,11 +1339,11 @@ impl Lens {
             let diff_root = context_root.clone();
             menu = menu
               .item(
-                PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Diff", "diff"))
+                PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Diff with current revision", "diff"))
                   .disabled(!enabled)
                   .on_click(move |_, _, cx| {
                     let _ = diff_view.update(cx, |this, cx| {
-                      if !this.busy && this.connected && this.root == diff_root && this.status.changes.iter().any(|change| change.path == diff_path && change.file_marker() == "M") {
+                      if !this.busy && this.connected && this.root == diff_root && this.status.changes.iter().any(|change| change.path == diff_path && is_modified_change(change)) {
                         this.external_diff(diff_path.clone(), cx);
                       }
                     });
@@ -1397,22 +1394,11 @@ impl Lens {
             }));
           } else if single_file {
             let absolute_path = context_root.join(&context_path);
-            let move_view = view.clone();
-            let move_root = context_root.clone();
-            let move_path = absolute_path.clone();
             let copy_path = absolute_path.clone();
             let reveal_path = absolute_path.clone();
             let terminal_path = absolute_path.clone();
             let terminal_view = view.clone();
             menu = menu
-              .item(PopupMenuItem::new(t("Move…")).disabled(!ready || !context_exists).on_click(move |_, window, cx| {
-                let _ = move_view.update(cx, |this, cx| {
-                  if !this.busy && this.root == move_root && matches!(move_path.try_exists(), Ok(true)) {
-                    this.move_dialog(move_path.clone(), window, cx);
-                  }
-                });
-              }))
-              .separator()
               .item(PopupMenuItem::new(t("Copy full path")).on_click(move |_, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(copy_path.to_string_lossy().into_owned()));
               }))
@@ -1461,79 +1447,7 @@ impl Lens {
                 }),
             );
             if context_exists && enabled {
-              let state = std::rc::Rc::new(std::cell::RefCell::new(None::<Result<bool, String>>));
-              let display_state = state.clone();
-              let action_state = state.clone();
-              let action_view = view.clone();
-              let action_path = absolute_path.clone();
-              let root = context_root.clone();
-              let cli = view.upgrade().map(|entity| entity.read(cx).cli.clone()).unwrap_or_default();
-              let identity = view.upgrade().and_then(|entity| entity.read(cx).settings.identity.clone());
-              let query_path = absolute_path.clone();
-              let original_root = context_root.clone();
-              let lock_shortcuts = shortcut_settings.clone();
-              let task = cx.background_executor().spawn(async move {
-                backend::run_as(
-                  &cli,
-                  &root,
-                  &["lock".into(), "status".into(), "--".into(), query_path.to_string_lossy().into_owned()],
-                  true,
-                  identity.as_deref(),
-                )
-                .and_then(|output| backend::parse_lock_status(&output))
-              });
-              let error_view = view.clone();
-              cx.spawn(async move |menu, cx| {
-                let result = task.await;
-                if let Err(error) = &result {
-                  let error = error.clone();
-                  let _ = error_view.update(cx, |this, cx| {
-                    this.log(format!("Lock status failed: {error}"));
-                    cx.notify();
-                  });
-                }
-                *state.borrow_mut() = Some(result);
-                let _ = menu.update(cx, |_, cx| cx.notify());
-              })
-              .detach();
-              menu = menu
-                .item(
-                  PopupMenuItem::element(move |_, _| {
-                    div().child(shortcuts::shortcut_label(
-                      &lock_shortcuts,
-                      match display_state.borrow().as_ref() {
-                        None => "Checking lock status…",
-                        Some(Ok(true)) => "Unlock",
-                        Some(Ok(false)) => "Lock",
-                        Some(Err(_)) => "Lock status unavailable — reopen to retry",
-                      },
-                      "lock",
-                    ))
-                  })
-                  .on_click(move |_, _, cx| {
-                    let Some(Ok(locked)) = action_state.borrow().as_ref().cloned() else {
-                      return;
-                    };
-                    let _ = action_view.update(cx, |this, cx| {
-                      if this.busy || !this.connected || this.root != original_root {
-                        return;
-                      }
-                      this.command(
-                        vec![
-                          "lock".into(),
-                          if locked { "release" } else { "acquire" }.into(),
-                          "--".into(),
-                          action_path.to_string_lossy().into_owned(),
-                        ],
-                        if locked { "Unlock" } else { "Lock" },
-                        false,
-                        true,
-                        cx,
-                      );
-                    });
-                  }),
-                )
-                .separator();
+              menu = menu.item(PopupMenuItem::new(t("Lock")).disabled(true)).separator();
             }
           }
           // Obliterate resolves the current/staged node. Untracked additions and
@@ -1650,7 +1564,7 @@ impl Lens {
               MUTED
             })
           })
-          .child(t(&change.action)),
+          .child(t(change_action_label(&change.action))),
       )
       .child(
         div()

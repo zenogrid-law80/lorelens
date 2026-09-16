@@ -548,7 +548,7 @@ impl Lens {
               let menu = if !directory
                 && view.upgrade().is_some_and(|entity| {
                   let lens = entity.read(cx);
-                  lens.root == context_root && lens.status.changes.iter().any(|change| change.path == context_relative && change.file_marker() == "M")
+                  lens.root == context_root && lens.status.changes.iter().any(|change| change.path == context_relative && is_modified_change(change))
                 }) {
                 let diff_view = view.clone();
                 let diff_path = context_relative.clone();
@@ -559,11 +559,11 @@ impl Lens {
                 });
                 menu
                   .item(
-                    PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Diff", "diff"))
+                    PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Diff with current revision", "diff"))
                       .disabled(!enabled)
                       .on_click(move |_, _, cx| {
                         let _ = diff_view.update(cx, |this, cx| {
-                          if this.root == diff_root && this.status.changes.iter().any(|change| change.path == diff_path && change.file_marker() == "M") {
+                          if this.root == diff_root && this.status.changes.iter().any(|change| change.path == diff_path && is_modified_change(change)) {
                             this.external_diff(diff_path.clone(), cx);
                           }
                         });
@@ -734,86 +734,7 @@ impl Lens {
                   });
                 }),
               );
-              let menu = if !directory {
-                let state = std::rc::Rc::new(std::cell::RefCell::new(None::<Result<bool, String>>));
-                let display_state = state.clone();
-                let action_state = state.clone();
-                let action_view = view.clone();
-                let action_path = context_path.clone();
-                let Some(entity) = view.upgrade() else {
-                  return menu;
-                };
-                let root = entity.read(cx).root.clone();
-                let cli = entity.read(cx).cli.clone();
-                let identity = entity.read(cx).settings.identity.clone();
-                let query_path = context_path.clone();
-                let original_root = root.clone();
-                let lock_shortcuts = shortcut_settings.clone();
-                let task = cx.background_executor().spawn(async move {
-                  backend::run_as(
-                    &cli,
-                    &root,
-                    &["lock".into(), "status".into(), "--".into(), query_path.to_string_lossy().into_owned()],
-                    true,
-                    identity.as_deref(),
-                  )
-                  .and_then(|output| backend::parse_lock_status(&output))
-                });
-                let error_view = view.clone();
-                cx.spawn(async move |menu, cx| {
-                  let result = task.await;
-                  if let Err(error) = &result {
-                    let error = error.clone();
-                    let _ = error_view.update(cx, |this, cx| {
-                      this.log(format!("Lock status failed: {error}"));
-                      cx.notify();
-                    });
-                  }
-                  *state.borrow_mut() = Some(result);
-                  let _ = menu.update(cx, |_, cx| cx.notify());
-                })
-                .detach();
-                menu
-                  .item(
-                    PopupMenuItem::element(move |_, _| {
-                      div().child(shortcuts::shortcut_label(
-                        &lock_shortcuts,
-                        match display_state.borrow().as_ref() {
-                          None => "Checking lock status…",
-                          Some(Ok(true)) => "Unlock",
-                          Some(Ok(false)) => "Lock",
-                          Some(Err(_)) => "Lock status unavailable — reopen to retry",
-                        },
-                        "lock",
-                      ))
-                    })
-                    .on_click(move |_, _, cx| {
-                      let Some(Ok(locked)) = action_state.borrow().as_ref().cloned() else {
-                        return;
-                      };
-                      let _ = action_view.update(cx, |this, cx| {
-                        if this.root != original_root {
-                          return;
-                        }
-                        this.command(
-                          vec![
-                            "lock".into(),
-                            if locked { "release" } else { "acquire" }.into(),
-                            "--".into(),
-                            action_path.to_string_lossy().into_owned(),
-                          ],
-                          if locked { "Unlock" } else { "Lock" },
-                          false,
-                          true,
-                          cx,
-                        );
-                      });
-                    }),
-                  )
-                  .separator()
-              } else {
-                menu
-              };
+              let menu = if !directory { menu.item(PopupMenuItem::new(t("Lock")).disabled(true)).separator() } else { menu };
               let menu = if delete_allowed {
                 menu.item(
                   PopupMenuItem::new(shortcuts::shortcut_label(&shortcut_settings, "Delete…", "delete"))

@@ -298,6 +298,7 @@
   "{count} items selected": "항목 {count}개 선택됨",
   "Select all files in folder": "폴더 내 모든 파일 선택",
   "Diff": "비교",
+  "Diff with current revision": "현재 리비전과 비교",
   "Stage file": "파일 스테이지",
   "Unstage file": "파일 스테이지 해제",
   "Discard": "변경 취소",

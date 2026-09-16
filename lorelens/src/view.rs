@@ -147,7 +147,11 @@ impl Render for Lens {
       .iter()
       .enumerate()
       .filter(|(_, change)| {
-        let text_matches = pending_query.is_empty() || change.path.to_lowercase().contains(&pending_query) || change.action.to_lowercase().contains(&pending_query);
+        let text_matches = pending_query.is_empty()
+          || change.path.to_lowercase().contains(&pending_query)
+          || change.action.to_lowercase().contains(&pending_query)
+          || change_action_label(&change.action).to_lowercase().contains(&pending_query)
+          || t(change_action_label(&change.action)).to_lowercase().contains(&pending_query);
         let state_matches = match state_filter {
           ChangeStateFilter::All => true,
           ChangeStateFilter::Staged => change.staged,
