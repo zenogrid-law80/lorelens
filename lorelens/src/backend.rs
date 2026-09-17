@@ -109,7 +109,10 @@ pub fn cleanup_resolved_merge(cli: &Path, root: &Path, relative: &str, identity:
 pub fn is_repository(root: &Path) -> bool {
   root.join(".lore").is_dir() || root.join(".urc").is_dir()
 }
-pub use filesystem::{copy_entries, delete_entry, list_directory, preview, validate_text_files};
+pub use filesystem::{
+  SpreadsheetSheet, copy_entries, delete_entry, is_fbx_path, is_image_path, is_spreadsheet_path, is_unreal_asset_path, list_directory, preview, preview_spreadsheet, preview_unreal_asset,
+  render_fbx_preview, syntax_language, validate_text_files,
+};
 
 /// Create placeholders for selected reset targets that are missing from disk.
 /// Lore needs a filesystem node to resolve staged deletions during reset.

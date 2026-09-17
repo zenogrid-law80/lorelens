@@ -147,6 +147,7 @@ struct Lens {
   pending_focus: FocusHandle,
   files_scroll: ScrollHandle,
   command_log_scroll: ScrollHandle,
+  preview_scroll: ScrollHandle,
   pending_scroll: UniformListScrollHandle,
   folder_to_select: Option<PathBuf>,
   root: PathBuf,
@@ -474,6 +475,7 @@ impl Lens {
             pending_focus: cx.focus_handle(),
             files_scroll: ScrollHandle::new(),
             command_log_scroll: ScrollHandle::new(),
+            preview_scroll: ScrollHandle::new(),
             pending_scroll: UniformListScrollHandle::new(),
             folder_to_select: None,
             directory: root.clone(), root, cli: settings.cli.clone().filter(|path| path.is_file()).unwrap_or_else(backend::find_cli), entries: vec![], file_filter_generation: 0,
@@ -844,8 +846,94 @@ impl Lens {
       return;
     }
     self.preview.path = Some(path.clone());
+    self.preview.image_path = None;
     self.preview.content.clear();
+    self.preview.sheets.clear();
+    self.preview.selected_sheet = 0;
+    self.preview.is_image = backend::is_image_path(std::path::Path::new(&path));
     self.output_title = path.clone();
+    if self.preview.is_image {
+      self.preview.finish();
+      cx.notify();
+      return;
+    }
+    if backend::is_spreadsheet_path(std::path::Path::new(&path)) {
+      let root = self.root.clone();
+      let file = root.join(&path);
+      let request = self.preview.begin();
+      let selected = path;
+      let preview_root = self.root.clone();
+      let task = cx.background_executor().spawn(async move { backend::preview_spreadsheet(&file) });
+      cx.spawn(async move |this, cx| {
+        let result = task.await;
+        let _ = this.update(cx, |this, cx| {
+          if !this.preview.accepts(request) || this.root != preview_root || this.selection.current.as_ref() != Some(&selected) {
+            return;
+          }
+          this.preview.finish();
+          match result {
+            Ok(sheets) => this.preview.sheets = sheets,
+            Err(error) => this.preview.content = tf("Preview unavailable: {error}\nUse Diff or File history for removed files.", &[("error", error)]),
+          }
+          cx.notify();
+        });
+      })
+      .detach();
+      cx.notify();
+      return;
+    }
+    if backend::is_unreal_asset_path(std::path::Path::new(&path)) {
+      let root = self.root.clone();
+      let file = root.clone().join(&path);
+      let request = self.preview.begin();
+      let selected = path;
+      let preview_root = self.root.clone();
+      let task = cx.background_executor().spawn(async move { backend::preview_unreal_asset(&root, &file) });
+      cx.spawn(async move |this, cx| {
+        let result = task.await;
+        let _ = this.update(cx, |this, cx| {
+          if !this.preview.accepts(request) || this.root != preview_root || this.selection.current.as_ref() != Some(&selected) {
+            return;
+          }
+          this.preview.finish();
+          this.preview.content = result.unwrap_or_else(|error| tf("Preview unavailable: {error}\nUse Diff or File history for removed files.", &[("error", error)]));
+          cx.notify();
+        });
+      })
+      .detach();
+      cx.notify();
+      return;
+    }
+    if backend::is_fbx_path(std::path::Path::new(&path)) {
+      let root = self.root.clone();
+      let file = root.join(&path);
+      let request = self.preview.begin();
+      let selected = path;
+      let preview_root = self.root.clone();
+      let task = cx.background_executor().spawn(async move { backend::render_fbx_preview(&file) });
+      cx.spawn(async move |this, cx| {
+        let result = task.await;
+        let _ = this.update(cx, |this, cx| {
+          if !this.preview.accepts(request) || this.root != preview_root || this.selection.current.as_ref() != Some(&selected) {
+            return;
+          }
+          this.preview.finish();
+          match result {
+            Ok(image_path) => {
+              this.preview.image_path = Some(image_path);
+              this.preview.is_image = true;
+            }
+            Err(error) => {
+              this.preview.content = tf("Preview unavailable: {error}\nUse Diff or File history for removed files.", &[("error", error)]);
+            }
+          }
+          cx.notify();
+        });
+      })
+      .detach();
+      cx.notify();
+      return;
+    }
     let root = self.root.clone();
     let file = root.join(&path);
     let request = self.preview.begin();

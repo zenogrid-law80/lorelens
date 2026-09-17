@@ -1,6 +1,6 @@
 [package]
 name = "lorelens"
-version = "0.1.28"
+version = "0.1.29"
 edition = "2024"
 description = "Lore desktop client built with GPUI"
 license = "MIT"
@@ -9,14 +9,37 @@ license = "MIT"
 gpui = { package = "gpui-pre", version = "=0.3.4" }
 # macOS requires font-kit; without it GPUI uses a text system that renders no glyphs.
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.4", features = ["font-kit"] }
-gpui-component = "=0.6.1"
+    gpui-component = { version = "=0.6.1", features = [
+        "tree-sitter-bash",
+        "tree-sitter-cpp",
+        "tree-sitter-csharp",
+        "tree-sitter-css",
+        "tree-sitter-diff",
+        "tree-sitter-go",
+        "tree-sitter-html",
+        "tree-sitter-java",
+        "tree-sitter-javascript",
+        "tree-sitter-lua",
+        "tree-sitter-markdown",
+        "tree-sitter-php",
+        "tree-sitter-proto",
+        "tree-sitter-python",
+        "tree-sitter-ruby",
+        "tree-sitter-rust",
+        "tree-sitter-toml",
+        "tree-sitter-yaml",
+        "tree-sitter-zig"
+    ] }
 gpui-kit-assets = "=0.6.1"
+calamine = "0.34"
 serde_json = "1"
 toml_edit = "0.25"
 tempfile = "3"
 unicode-segmentation = "1"
 globset = "0.4"
 chrono = "0.4"
+ropey = "=2.0.0-beta.1"
+threers = { version = "0.0.5", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"

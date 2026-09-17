@@ -1,5 +1,141 @@
 use super::*;
 
+fn expand_tabs(text: &str) -> String {
+  text.replace('\t', "  ")
+}
+
+fn expanded_offset(text: &str, offset: usize) -> usize {
+  text[..offset].chars().map(|character| if character == '\t' { 2 } else { character.len_utf8() }).sum()
+}
+
+fn preview_text_lines(path: Option<&str>, content: &str) -> Vec<AnyElement> {
+  ensure_csharp_highlights();
+  let Some(language) = path.and_then(|path| backend::syntax_language(std::path::Path::new(path))) else {
+    return content
+      .lines()
+      .map(|line| div().min_h(px(20.)).whitespace_nowrap().child(expand_tabs(line)).into_any_element())
+      .collect();
+  };
+
+  let mut highlighter = gpui_component::highlighter::SyntaxHighlighter::new(language);
+  let rope = ropey::Rope::from_str(content);
+  highlighter.update(None, &rope, None);
+  let theme = gpui_component::highlighter::HighlightTheme::default_dark();
+  let styles = highlighter.styles(&(0..content.len()), &*theme);
+  let mut lines = Vec::new();
+  let mut offset = 0;
+  for raw_line in content.split_inclusive('\n') {
+    let line = raw_line
+      .strip_suffix('\n')
+      .unwrap_or(raw_line)
+      .strip_suffix('\r')
+      .unwrap_or(raw_line.strip_suffix('\n').unwrap_or(raw_line));
+    let line_end = offset + line.len();
+    let line_styles = styles.iter().filter_map(|(range, style)| {
+      let start = range.start.max(offset);
+      let end = range.end.min(line_end);
+      (start < end).then(|| (expanded_offset(line, start - offset)..expanded_offset(line, end - offset), *style))
+    });
+    lines.push(
+      div()
+        .min_h(px(20.))
+        .whitespace_nowrap()
+        .child(gpui::StyledText::new(expand_tabs(line)).with_highlights(line_styles))
+        .into_any_element(),
+    );
+    offset += raw_line.len();
+  }
+  lines
+}
+
+fn ensure_csharp_highlights() {
+  static REGISTERED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+  REGISTERED.get_or_init(|| {
+    let registry = gpui_component::highlighter::LanguageRegistry::singleton();
+    if let Some(mut config) = registry.language("csharp")
+      && config.highlights.is_empty()
+    {
+      config.highlights = include_str!("csharp_highlights.scm").into();
+      registry.register("csharp", &config);
+    }
+  });
+}
+
+fn spreadsheet_column_name(mut column: usize) -> String {
+  let mut name = String::new();
+  column += 1;
+  while column > 0 {
+    column -= 1;
+    name.insert(0, (b'A' + (column % 26) as u8) as char);
+    column /= 26;
+  }
+  name
+}
+
+fn spreadsheet_grid(sheet: &backend::SpreadsheetSheet, cx: &App) -> AnyElement {
+  let color = palette(cx);
+  let columns = sheet.total_columns.clamp(1, 30);
+  let mut grid = div()
+    .flex()
+    .flex_col()
+    .w(px(56. + 160. * columns as f32))
+    .font_family(gpui_component::Theme::global(cx).mono_font_family.clone())
+    .text_size(px(12.));
+  let mut header = div().flex().h(px(28.)).bg(color(Header));
+  header = header.child(div().w(px(56.)).flex_shrink_0().px_2().border_1().border_color(color(BORDER)).child(""));
+  for column in 0..columns {
+    header = header.child(
+      div()
+        .w(px(160.))
+        .flex_shrink_0()
+        .px_2()
+        .border_1()
+        .border_color(color(BORDER))
+        .child(spreadsheet_column_name(sheet.first_column + column)),
+    );
+  }
+  grid = grid.child(header);
+  for (index, row) in sheet.cells.iter().enumerate() {
+    let mut line = div().flex().h(px(26.));
+    line = line.child(
+      div()
+        .w(px(56.))
+        .flex_shrink_0()
+        .px_2()
+        .border_1()
+        .border_color(color(BORDER))
+        .bg(color(Header))
+        .child((sheet.first_row + index + 1).to_string()),
+    );
+    for column in 0..columns {
+      line = line.child(
+        div()
+          .w(px(160.))
+          .flex_shrink_0()
+          .px_2()
+          .overflow_hidden()
+          .whitespace_nowrap()
+          .border_1()
+          .border_color(color(BORDER))
+          .child(row.get(column).cloned().unwrap_or_default()),
+      );
+    }
+    grid = grid.child(line);
+  }
+  grid.into_any_element()
+}
+
+#[cfg(test)]
+mod spreadsheet_preview_tests {
+  #[test]
+  fn column_names_cross_the_z_boundary() {
+    assert_eq!(super::spreadsheet_column_name(0), "A");
+    assert_eq!(super::spreadsheet_column_name(25), "Z");
+    assert_eq!(super::spreadsheet_column_name(26), "AA");
+    assert_eq!(super::spreadsheet_column_name(701), "ZZ");
+  }
+}
+
 impl Lens {
   pub(super) fn select_pending_row(&mut self, index: usize, range: bool, cx: &mut Context<Self>) {
     let Some(row) = self.pending_rows.get(index).cloned() else { return };
@@ -95,6 +231,7 @@ impl Render for Lens {
     let push_label = format!("{}  {}", t("Push"), sync_count(&self.pending_push));
     let staged = self.status.changes.iter().filter(|c| c.staged).count();
     let has_logs = !self.logs.is_empty();
+    let fbx_loading = self.preview.is_loading() && self.preview.path.as_deref().is_some_and(|path| backend::is_fbx_path(std::path::Path::new(path)));
 
     let sidebar_visible = !self.root.as_os_str().is_empty();
     let sidebar = div().size_full().pr_1().flex().when(sidebar_visible, |d| d.child(self.render_file_browser(window_active, cx)));
@@ -362,6 +499,87 @@ impl Render for Lens {
             .child(gpui_component::scroll::Scrollbar::vertical(&self.command_log_scroll).mode(gpui_component::scroll::ScrollbarMode::Always)),
         )
       });
+    let preview_content = if self.preview.is_image {
+      let image = self.preview.image_path.clone().or_else(|| self.preview.path.as_ref().map(|path| self.root.join(path)));
+      div()
+        .id("file-preview-image")
+        .flex_1()
+        .min_h_0()
+        .overflow_scroll()
+        .flex()
+        .items_center()
+        .justify_center()
+        .p_3()
+        .when_some(image, |view, path| view.child(gpui::img(path).max_w_full().max_h_full()))
+        .into_any_element()
+    } else if let Some(sheet) = self.preview.sheets.get(self.preview.selected_sheet) {
+      let mut sheet_tabs = div().id("preview-sheet-tabs").flex().flex_shrink_0().overflow_scroll().border_b_1().border_color(rgb(BORDER));
+      for (index, item) in self.preview.sheets.iter().enumerate() {
+        sheet_tabs = sheet_tabs.child(
+          div()
+            .id(("preview-sheet", index))
+            .px_3()
+            .py_2()
+            .flex_shrink_0()
+            .cursor_pointer()
+            .bg(rgb(if index == self.preview.selected_sheet { Surface } else { PANEL }))
+            .child(item.name.clone())
+            .on_click(cx.listener(move |this, _, _, cx| {
+              this.preview.selected_sheet = index;
+              this.preview_scroll.set_offset(point(px(0.), px(0.)));
+              cx.notify();
+            })),
+        );
+      }
+      div()
+        .flex_1()
+        .min_h_0()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .child(sheet_tabs)
+        .child(
+          div()
+            .px_3()
+            .py_1()
+            .text_size(px(11.))
+            .text_color(rgb(MUTED))
+            .child(format!("{} rows x {} columns · showing up to 200 rows x 30 columns", sheet.total_rows, sheet.total_columns)),
+        )
+        .child(
+          div()
+            .id("spreadsheet-preview-grid")
+            .track_scroll(&self.preview_scroll)
+            .flex_1()
+            .min_h_0()
+            .overflow_scroll()
+            .child(spreadsheet_grid(sheet, cx)),
+        )
+        .into_any_element()
+    } else {
+      div()
+        .relative()
+        .flex_1()
+        .min_h_0()
+        .flex()
+        .flex_col()
+        .overflow_hidden()
+        .child(
+          div()
+            .id("file-preview-content")
+            .track_scroll(&self.preview_scroll)
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .font_family(gpui_component::Theme::global(cx).mono_font_family.clone())
+            .text_size(px(12.))
+            .p_3()
+            .pr(px(24.))
+            .children(preview_text_lines(self.preview.path.as_deref(), &self.preview.content)),
+        )
+        .child(gpui_component::scroll::Scrollbar::vertical(&self.preview_scroll).mode(gpui_component::scroll::ScrollbarMode::Always))
+        .into_any_element()
+    };
     let upper_panel = div()
       .size_full()
       .min_w_0()
@@ -375,17 +593,8 @@ impl Render for Lens {
       .overflow_hidden()
       .child(tabs)
       .when(self.tab == Tab::Files, |d| {
-        d.child(div().px_3().py_2().bg(rgb(PANEL)).child(self.preview.path.clone().unwrap_or_else(|| t("File preview")))).child(
-          div()
-            .id("file-preview-content")
-            .flex_1()
-            .min_h_0()
-            .overflow_scroll()
-            .font_family(gpui_component::Theme::global(cx).mono_font_family.clone())
-            .text_size(px(12.))
-            .p_3()
-            .children(self.preview.content.lines().map(|line| div().min_h(px(20.)).child(line.to_string())).collect::<Vec<_>>()),
-        )
+        d.child(div().px_3().py_2().bg(rgb(PANEL)).child(self.preview.path.clone().unwrap_or_else(|| t("File preview"))))
+          .child(preview_content)
       })
       .when(self.tab == Tab::History, |d| d.child(self.render_file_history(cx)))
       .when(self.tab == Tab::Pending, |d| {
@@ -778,6 +987,37 @@ impl Render for Lens {
                     |bar, delta| bar.left(relative(0.7 * (1. - (2. * delta - 1.).abs()))),
                   ),
                 )),
+            ),
+        )
+      })
+      .when(fbx_loading, |view| {
+        view.child(
+          div()
+            .absolute()
+            .inset_0()
+            .occlude()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui::rgba(0x00000080))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .child(
+              div()
+                .w(px(420.))
+                .max_w_full()
+                .p_6()
+                .rounded_lg()
+                .bg(rgb(PANEL))
+                .border_1()
+                .border_color(rgb(BORDER))
+                .flex()
+                .flex_col()
+                .gap_4()
+                .child(t("Working…"))
+                .child(div().text_size(px(12.)).overflow_hidden().child(t("Rendering FBX preview…")))
+                .child(gpui_component::progress::Progress::new("fbx-render-progress").loading(true).accessibility_label(t("Working…"))),
             ),
         )
       })

@@ -219,7 +219,11 @@ impl SelectionState {
 #[derive(Default)]
 pub(super) struct PreviewState {
   pub path: Option<String>,
+  pub image_path: Option<std::path::PathBuf>,
   pub content: String,
+  pub sheets: Vec<crate::backend::SpreadsheetSheet>,
+  pub selected_sheet: usize,
+  pub is_image: bool,
   generation: u64,
   loading: bool,
 }
@@ -238,6 +242,11 @@ impl PreviewState {
   pub fn finish(&mut self) {
     self.loading = false;
   }
+
+  pub fn is_loading(&self) -> bool {
+    self.loading
+  }
+
   pub fn invalidate(&mut self) {
     self.generation = self.generation.wrapping_add(1);
     self.loading = false;
