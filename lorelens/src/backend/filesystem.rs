@@ -475,6 +475,7 @@ pub fn syntax_language(path: &Path) -> Option<&'static str> {
     Some("yml" | "yaml") => Some("yaml"),
     Some("rb") => Some("ruby"),
     Some("zig") => Some("zig"),
+    Some("fbx") => Some("text"),
     _ => None,
   }
 }

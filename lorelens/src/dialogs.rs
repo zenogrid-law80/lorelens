@@ -1533,9 +1533,10 @@ impl Lens {
     }
     let no_repository = !backend::is_repository(&self.root);
     let history = self.settings.login_urls.clone();
+    let default_url = backend::repository_remote_url(&self.root).or_else(|| history.first().cloned()).unwrap_or_default();
     let url = cx.new(|cx| {
       let mut input = TextInput::new("lores://server:port", cx);
-      input.content = history.first().cloned().unwrap_or_default().into();
+      input.content = default_url.into();
       input
     });
     let view = cx.entity().downgrade();

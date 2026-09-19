@@ -189,6 +189,8 @@ struct Lens {
   remote_branches: Vec<String>,
   show_branches: bool,
   connect_after_load: bool,
+  startup_login_checked: bool,
+  repository_login_checking: bool,
   startup_login_pending: bool,
   #[cfg(windows)]
   cli_install_pending: bool,
@@ -197,6 +199,7 @@ struct Lens {
   conflict_dialog_entries: std::rc::Rc<std::cell::RefCell<Vec<ConflictDialogEntry>>>,
   conflict_dialog_selection: std::rc::Rc<std::cell::RefCell<std::collections::HashSet<String>>>,
   conflict_dialog_working: std::rc::Rc<std::cell::Cell<bool>>,
+  progress_popup_dismissed: bool,
   conflict_dialog_sort: std::rc::Rc<std::cell::Cell<ConflictSort>>,
   prompted_conflicts: std::collections::HashSet<String>,
   refresh_pending: bool,
@@ -492,6 +495,8 @@ impl Lens {
             filter, pending_filter, change_state_filter: ChangeStateFilter::All, selected_path, pending_visible: Vec::new(), pending_rows: Vec::new(), notice: "Opening repository…".into(), error: false, show_log, obliterate_enabled: false,
             settings, settings_error, branch_output: String::new(), show_branches: false,
             connect_after_load,
+            startup_login_checked: !connect_after_load,
+            repository_login_checking: false,
             startup_login_pending: false,
             #[cfg(windows)]
             cli_install_pending: false,
@@ -500,6 +505,7 @@ impl Lens {
             conflict_dialog_entries: Default::default(),
             conflict_dialog_selection: Default::default(),
             conflict_dialog_working: Default::default(),
+            progress_popup_dismissed: false,
             conflict_dialog_sort: Default::default(),
             prompted_conflicts: Default::default(),
             refresh_pending: false,
@@ -563,6 +569,106 @@ impl Lens {
     true
   }
 
+  fn check_repository_login(&mut self, cx: &mut Context<Self>) {
+    if self.repository_login_checking || !backend::is_repository(&self.root) {
+      return;
+    }
+    self.repository_login_checking = true;
+    let cli = self.cli.clone();
+    let root = self.root.clone();
+    let identity = self.settings.identity.clone();
+    let checked_root = root.clone();
+    let check = cx.background_executor().spawn(async move {
+      let repository_identity = backend::repository_identity(&root)?;
+      let output = backend::run_global(&cli, &root, &["auth".into(), "list".into()], true, None)?;
+      let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+      backend::startup_login_status(&output, repository_identity.as_deref(), identity.as_deref(), now)
+    });
+    cx.spawn(async move |this, cx| {
+      let result = check.await;
+      let _ = this.update(cx, |this, cx| {
+        if this.root != checked_root {
+          return;
+        }
+        this.repository_login_checking = false;
+        this.startup_login_checked = true;
+        match result {
+          Ok(backend::StartupLoginStatus::Valid(identity)) => {
+            if this.settings.identity.is_none() && identity.is_some() {
+              this.settings.identity = identity;
+              this.save_settings();
+            }
+            if this.connect_after_load && !this.busy {
+              this.connect_after_load = false;
+              this.command(vec!["status".into(), "--scan".into()], "Repository status", true, false, cx);
+            }
+          }
+          Ok(backend::StartupLoginStatus::LoginRequired) => {
+            this.connect_after_load = false;
+            this.startup_login_pending = true;
+          }
+          Ok(backend::StartupLoginStatus::IdentityMismatch { repository, login }) => {
+            this.connect_after_load = false;
+            this.clear_mismatched_repository_login(repository, login, cx);
+          }
+          Err(error) => {
+            this.connect_after_load = false;
+            this.error = true;
+            this.notice = "Could not verify repository authentication · see details".into();
+            this.output_title = "Authentication failed".into();
+            this.output = error.clone();
+            this.log(format!("Repository login check: {error}"));
+          }
+        }
+        cx.notify();
+      });
+    })
+    .detach();
+  }
+
+  fn clear_mismatched_repository_login(&mut self, repository: String, login: String, cx: &mut Context<Self>) {
+    self.repository_login_checking = true;
+    self.settings.identity = None;
+    self.settings.login_remote = None;
+    self.logged_in_account = "Not signed in".into();
+    self.save_settings();
+
+    let cli = self.cli.clone();
+    let root = self.root.clone();
+    let checked_root = root.clone();
+    let clear_login = login.clone();
+    let clear = cx
+      .background_executor()
+      .spawn(async move { backend::run_global(&cli, &root, &["auth".into(), "clear".into()], false, Some(&clear_login)) });
+    cx.spawn(async move |this, cx| {
+      let result = clear.await;
+      let _ = this.update(cx, |this, cx| {
+        if this.root != checked_root {
+          return;
+        }
+        this.repository_login_checking = false;
+        this.startup_login_pending = true;
+        this.error = true;
+        this.notice = "Repository login does not match · see details".into();
+        this.output_title = "Authentication failed".into();
+        let mismatch = tf(
+          "Repository identity {repository} does not match the signed-in identity {login}. Sign in to this repository again.",
+          &[("repository", repository), ("login", login.clone())],
+        );
+        this.output = match result {
+          Ok(_) => format!("{mismatch}\n\n{}", tf("Stored authentication for {login} was removed.", &[("login", login)])),
+          Err(error) => {
+            this.log(format!("Authentication clear failed: {error}"));
+            format!("{mismatch}\n\n{}", tf("Could not remove stored authentication: {error}", &[("error", error)]))
+          }
+        };
+        this.log(this.output.clone());
+        cx.notify();
+      });
+    })
+    .detach();
+  }
+
   fn open_repository(&mut self, path: PathBuf, cx: &mut Context<Self>) {
     if self.busy {
       return;
@@ -609,6 +715,9 @@ impl Lens {
     self.remote_history = remote_history::RemoteHistoryState::new(cx);
     self.output_title = "Repository opened".into();
     self.connect_after_load = backend::is_repository(&self.root);
+    self.startup_login_checked = !self.connect_after_load;
+    self.repository_login_checking = false;
+    self.startup_login_pending = false;
     if self.connect_after_load {
       self.settings.remember(&self.root);
       self.save_settings();
@@ -686,8 +795,12 @@ impl Lens {
             this.error = false;
             this.notice = tf("{count} entries · local filesystem", &[("count", this.entries.len().to_string())]);
             if this.connect_after_load {
-              this.connect_after_load = false;
-              this.command(vec!["status".into(), "--scan".into()], "Repository status", true, false, cx);
+              if this.startup_login_checked {
+                this.connect_after_load = false;
+                this.command(vec!["status".into(), "--scan".into()], "Repository status", true, false, cx);
+              } else if !this.repository_login_checking {
+                this.check_repository_login(cx);
+              }
             }
           }
           Err(e) => {
@@ -1739,13 +1852,16 @@ fn main() {
           .detach();
           cx.observe_in(&cx.entity(), window, |this, _, window, cx| {
             this.conflict_dialog_working.set(this.busy);
+            if !this.busy {
+              this.progress_popup_dismissed = false;
+            }
             #[cfg(windows)]
             if this.cli_install_pending && !this.busy {
               this.cli_install_pending = false;
               this.install_cli_dialog(window, cx);
               return;
             }
-            if this.startup_login_pending && !this.busy {
+            if this.startup_login_pending && !this.busy && !window.has_active_dialog(cx) {
               this.startup_login_pending = false;
               this.login_dialog(window, cx);
               return;
@@ -1773,29 +1889,11 @@ fn main() {
           {
             this.cli_install_pending = cli_install::cli_missing(&this.cli);
           }
-          let cli = this.cli.clone();
-          let root = this.root.clone();
-          let identity = this.settings.identity.clone();
-          let check = cx.background_executor().spawn(async move {
-            let output = backend::run_as(&cli, &root, &["auth".into(), "list".into()], true, None)?;
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-            backend::has_valid_login(&output, identity.as_deref(), now)
-          });
-          cx.spawn(async move |this, cx| {
-            let result = check.await;
-            let _ = this.update(cx, |this, cx| {
-              match result {
-                Ok(valid) => this.startup_login_pending = !valid,
-                Err(error) => this.log(format!("Startup login check: {error}")),
-              }
-              cx.notify();
-            });
-          })
-          .detach();
+          this.check_repository_login(cx);
           let mut was_active = window.is_window_active();
           cx.observe_window_activation(window, move |this, window, cx| {
             let active = window.is_window_active();
-            if active && !was_active {
+            if active && !was_active && this.connected {
               this.refresh_with_mode(true, cx);
             }
             if active != was_active {

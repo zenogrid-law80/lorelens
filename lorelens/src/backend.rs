@@ -55,7 +55,7 @@ pub fn search_tree(root: &Path, query: &str) -> Result<Vec<Entry>, String> {
   walk(root, root, &query, &mut result)?;
   Ok(result)
 }
-pub use cli::{find_cli, run_as, run_branch_switch_skipping_unavailable};
+pub use cli::{find_cli, run_as, run_branch_switch_skipping_unavailable, run_global};
 pub use deduplicate::{deduplicate_commands, deduplicate_files, duplicate_change_paths, duplicate_local_files};
 pub use history::{
   FileRevision, RemoteCommit, RemoteHistory, RevisionComparison, RevisionFile, file_history, local_branch_history, local_history, remote_branch_history, revision_files, revision_patch,
@@ -547,6 +547,76 @@ pub fn has_valid_login(output: &str, identity: Option<&str>, now_ms: u64) -> Res
   Ok(valid)
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum StartupLoginStatus {
+  Valid(Option<String>),
+  LoginRequired,
+  IdentityMismatch { repository: String, login: String },
+}
+
+pub fn startup_login_status(output: &str, repository_identity: Option<&str>, selected_identity: Option<&str>, now_ms: u64) -> Result<StartupLoginStatus, String> {
+  let mut complete = false;
+  let mut valid_identities = std::collections::BTreeSet::new();
+  for line in output.lines().filter(|line| !line.trim().is_empty()) {
+    let event: Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
+    match event["tagName"].as_str() {
+      Some("authIdentity") => {
+        let data = &event["data"];
+        if let Some(id) = data["userId"].as_str().filter(|id| !id.is_empty())
+          && data["expires"].as_u64().is_some_and(|expires| expires == 0 || expires > now_ms)
+        {
+          valid_identities.insert(id.to_owned());
+        }
+      }
+      Some("complete") => {
+        if event["data"]["status"].as_i64() != Some(0) {
+          return Err("Login state check failed".into());
+        }
+        complete = true;
+      }
+      _ => {}
+    }
+  }
+  if !complete {
+    return Err("Login state check did not complete".into());
+  }
+  if let (Some(repository), Some(login)) = (repository_identity, selected_identity)
+    && repository != login
+  {
+    return Ok(StartupLoginStatus::IdentityMismatch {
+      repository: repository.into(),
+      login: login.into(),
+    });
+  }
+  let expected = repository_identity.or(selected_identity);
+  if has_valid_login(output, expected, now_ms)? {
+    return Ok(StartupLoginStatus::Valid(expected.map(str::to_owned)));
+  }
+  if let Some(repository) = repository_identity
+    && let Some(login) = valid_identities.first()
+  {
+    return Ok(StartupLoginStatus::IdentityMismatch {
+      repository: repository.into(),
+      login: login.clone(),
+    });
+  }
+  Ok(StartupLoginStatus::LoginRequired)
+}
+
+pub fn repository_identity(root: &Path) -> Result<Option<String>, String> {
+  for metadata in [".lore", ".urc"] {
+    let path = root.join(metadata).join("config.toml");
+    let text = match fs::read_to_string(&path) {
+      Ok(text) => text,
+      Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+      Err(error) => return Err(format!("{}: {error}", path.display())),
+    };
+    let document = text.parse::<toml_edit::DocumentMut>().map_err(|error| format!("{}: {error}", path.display()))?;
+    return Ok(document.get("identity").and_then(|item| item.as_str()).filter(|identity| !identity.is_empty()).map(str::to_owned));
+  }
+  Ok(None)
+}
+
 pub fn update_repository_identity(root: &Path, identity: &str) -> Result<(), String> {
   use std::io::Write;
   let path = root.join(".lore/config.toml");
@@ -619,6 +689,48 @@ mod tests {
       )
       .unwrap()
     );
+  }
+
+  #[test]
+  fn startup_login_reports_repository_identity_mismatches() {
+    let output = concat!(
+      "{\"tagName\":\"authIdentity\",\"data\":{\"userId\":\"signed-in\",\"expires\":2000}}\n",
+      "{\"tagName\":\"complete\",\"data\":{\"status\":0}}"
+    );
+    assert_eq!(
+      startup_login_status(output, Some("repository-account"), Some("signed-in"), 1000).unwrap(),
+      StartupLoginStatus::IdentityMismatch {
+        repository: "repository-account".into(),
+        login: "signed-in".into()
+      }
+    );
+    assert_eq!(
+      startup_login_status(output, Some("signed-in"), Some("signed-in"), 1000).unwrap(),
+      StartupLoginStatus::Valid(Some("signed-in".into()))
+    );
+    assert_eq!(
+      startup_login_status(output, Some("signed-in"), None, 1000).unwrap(),
+      StartupLoginStatus::Valid(Some("signed-in".into()))
+    );
+    assert_eq!(
+      startup_login_status(output, Some("missing"), None, 1000).unwrap(),
+      StartupLoginStatus::IdentityMismatch {
+        repository: "missing".into(),
+        login: "signed-in".into()
+      }
+    );
+  }
+
+  #[test]
+  fn reads_repository_identity_from_lore_and_legacy_metadata() {
+    for metadata in [".lore", ".urc"] {
+      let root = tempfile::tempdir().unwrap();
+      fs::create_dir(root.path().join(metadata)).unwrap();
+      fs::write(root.path().join(metadata).join("config.toml"), "identity = \"repository-account\"\n").unwrap();
+      assert_eq!(repository_identity(root.path()).unwrap().as_deref(), Some("repository-account"));
+    }
+    let root = tempfile::tempdir().unwrap();
+    assert_eq!(repository_identity(root.path()).unwrap(), None);
   }
 
   #[test]

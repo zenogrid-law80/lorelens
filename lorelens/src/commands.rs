@@ -34,6 +34,12 @@ impl CommandKind {
   fn is_authentication(self) -> bool {
     matches!(self, Self::Login | Self::Account)
   }
+  fn updates_repository_identity(self) -> bool {
+    self == Self::Login
+  }
+  fn is_global_authentication(self) -> bool {
+    self == Self::Logout
+  }
   fn changes_worktree(self) -> bool {
     matches!(self, Self::Sync | Self::SwitchBranch | Self::Merge)
   }
@@ -95,6 +101,11 @@ mod tests {
       assert_eq!(CommandKind::from_args(&args), expected);
     }
     assert!(CommandKind::Account.is_authentication());
+    assert!(!CommandKind::Account.updates_repository_identity());
+    assert!(CommandKind::Login.updates_repository_identity());
+    assert!(CommandKind::Logout.is_global_authentication());
+    assert!(!CommandKind::Account.is_global_authentication());
+    assert!(!CommandKind::Login.is_global_authentication());
     assert!(CommandKind::Sync.changes_worktree());
     assert!(CommandKind::SwitchBranch.changes_worktree());
     assert!(CommandKind::Merge.changes_worktree());
@@ -217,6 +228,9 @@ impl Lens {
               let branch_switch = args.first().is_some_and(|arg| arg == "branch") && args.get(1).is_some_and(|arg| arg == "switch");
               let result = if branch_switch {
                 backend::run_branch_switch_skipping_unavailable(&cli, &root, &args, if login { None } else { identity.as_deref() })
+              } else if kind.is_global_authentication() {
+                let command_identity = (kind != CommandKind::Logout).then_some(identity.as_deref()).flatten();
+                backend::run_global(&cli, &root, &args, status || authentication || branches, command_identity)
               } else {
                 backend::run_as(&cli, &root, &args, status || authentication || branches, if login { None } else { identity.as_deref() })
               };
@@ -243,7 +257,7 @@ impl Lens {
       if result.is_err() {
         backend::cleanup_reset_paths(&reset_placeholders);
       }
-      let identity_update = if authentication && backend::is_repository(&root) {
+      let identity_update = if kind.updates_repository_identity() && backend::is_repository(&root) {
         result
           .as_ref()
           .ok()
@@ -379,6 +393,8 @@ impl Lens {
               this.settings.login_remote = None;
               this.logged_in_account = "Not signed in".into();
               this.startup_login_pending = false;
+              this.connect_after_load = false;
+              this.startup_login_checked = true;
               this.refresh_pending = false;
               this.connected = false;
               this.notice = "Logged out".into();
@@ -408,14 +424,16 @@ impl Lens {
             } else if kind.is_authentication() {
               match backend::parse_account(&output) {
                 Ok((id, name)) => {
-                  this.logged_in_account = name;
-                  this.settings.identity = Some(id);
-                  this.save_settings();
-                  this.notice = "Account loaded".into();
-                  if let Some(Err(error)) = &identity_update {
-                    this.error = true;
-                    this.notice = "Account loaded; repository identity update failed".into();
-                    this.log(error.clone());
+                  let repository_identity = backend::repository_identity(&this.root);
+                  if let Ok(Some(repository)) = repository_identity
+                    && repository != id
+                  {
+                    this.clear_mismatched_repository_login(repository, id, cx);
+                  } else {
+                    this.logged_in_account = name;
+                    this.settings.identity = Some(id);
+                    this.save_settings();
+                    this.notice = "Account loaded".into();
                   }
                 }
                 Err(error) => {
@@ -470,6 +488,13 @@ impl Lens {
             }
             if kind.is_authentication() {
               this.logged_in_account = "Account unavailable".into();
+            }
+            if kind == CommandKind::Account && e.contains("Not authenticated") {
+              this.settings.identity = None;
+              this.logged_in_account = "Not signed in".into();
+              this.connected = false;
+              this.startup_login_pending = true;
+              this.save_settings();
             }
             this.error = true;
             this.notice = validation.unwrap_or_else(|| {

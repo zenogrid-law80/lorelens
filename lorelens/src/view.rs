@@ -953,7 +953,7 @@ impl Render for Lens {
           .child(concat!("Rust + GPUI · LoreLens v", env!("CARGO_PKG_VERSION"))),
       )
       .children(Root::render_dialog_layer(window, cx))
-      .when(self.busy && !self.silent_refresh, |view| {
+      .when(self.busy && !self.silent_refresh && !self.progress_popup_dismissed, |view| {
         view.child(
           div()
             .absolute()
@@ -978,7 +978,20 @@ impl Render for Lens {
                 .flex()
                 .flex_col()
                 .gap_4()
-                .child(t("Working…"))
+                .child(
+                  div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(t("Working…"))
+                    .child(Button::new("close-progress-popup").border_0().small().label("×").on_click(cx.listener(|this, _, _, cx| {
+                      this.progress_popup_dismissed = true;
+                      if this.connected {
+                        this.refresh(cx);
+                      }
+                      cx.notify();
+                    }))),
+                )
                 .child(div().text_size(px(12.)).overflow_hidden().child(t(&self.notice)))
                 .child(div().relative().h(px(6.)).w_full().overflow_hidden().rounded_full().bg(rgb(BORDER)).child(
                   div().absolute().h_full().w(relative(0.3)).rounded_full().bg(rgb(Accent)).with_animation(
