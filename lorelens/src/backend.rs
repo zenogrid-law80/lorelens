@@ -114,10 +114,31 @@ pub use filesystem::{
   render_fbx_preview, syntax_language, validate_text_files,
 };
 
-/// Create placeholders for selected reset targets that are missing from disk.
+/// Roll back placeholders only until a reset command can have written to them.
+#[derive(Default)]
+pub struct ResetPaths {
+  created: Vec<PathBuf>,
+}
+
+impl ResetPaths {
+  pub fn begin_reset(&mut self) {
+    // Once reset can write these paths, even an empty file may be a restored
+    // revision. Never delete them on failure or timeout after this point.
+    self.created.clear();
+  }
+}
+
+impl Drop for ResetPaths {
+  fn drop(&mut self) {
+    for path in &self.created {
+      let _ = fs::remove_file(path);
+    }
+  }
+}
+
 /// Lore needs a filesystem node to resolve staged deletions during reset.
-pub fn prepare_reset_paths(root: &Path, commands: &[Vec<String>]) -> Result<Vec<PathBuf>, String> {
-  let mut created = Vec::new();
+pub fn prepare_reset_paths(root: &Path, commands: &[Vec<String>]) -> Result<ResetPaths, String> {
+  let mut paths = ResetPaths::default();
   for args in commands.iter().filter(|args| args.first().is_some_and(|arg| arg == "reset")) {
     let Some(separator) = args.iter().position(|arg| arg == "--") else { continue };
     for argument in &args[separator + 1..] {
@@ -127,24 +148,15 @@ pub fn prepare_reset_paths(root: &Path, commands: &[Vec<String>]) -> Result<Vec<
         continue;
       }
       match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
-        Ok(_) => created.push(path),
+        Ok(_) => paths.created.push(path),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(error) => {
-          for created_path in &created {
-            let _ = fs::remove_file(created_path);
-          }
           return Err(format!("Cannot prepare reset path {}: {error}", path.display()));
         }
       }
     }
   }
-  Ok(created)
-}
-
-pub fn cleanup_reset_paths(paths: &[PathBuf]) {
-  for path in paths {
-    let _ = fs::remove_file(path);
-  }
+  Ok(paths)
 }
 
 use serde_json::Value;
@@ -480,7 +492,7 @@ pub fn move_entry(root: &Path, source: &Path, destination: &Path) -> Result<(), 
     if relative.as_os_str().is_empty()
       || relative.components().any(|part| {
         let name = part.as_os_str().to_string_lossy();
-        name.eq_ignore_ascii_case(".lore") || name.eq_ignore_ascii_case(".git")
+        [".lore", ".urc", ".git"].iter().any(|metadata| name.eq_ignore_ascii_case(metadata))
       })
     {
       return Err("Cannot move repository root or metadata.".into());
@@ -764,6 +776,69 @@ mod tests {
     assert!(move_entry(root.path(), &folder, &folder.join("nested")).is_err());
     assert!(move_entry(root.path(), root.path(), &folder.join("root")).is_err());
   }
+
+  #[test]
+  fn move_rejects_metadata_sources_and_destinations_including_legacy_repositories() {
+    for name in [".lore", ".urc", ".git", ".URC"] {
+      let root = tempfile::tempdir().unwrap();
+      let metadata = root.path().join(name);
+      fs::create_dir(&metadata).unwrap();
+      fs::write(metadata.join("config.toml"), "metadata").unwrap();
+      let source = root.path().join("keep.txt");
+      fs::write(&source, "user content").unwrap();
+      assert!(move_entry(root.path(), &metadata, &root.path().join("renamed")).is_err());
+      assert!(move_entry(root.path(), &metadata.join("config.toml"), &root.path().join("config.toml")).is_err());
+      assert!(move_entry(root.path(), &source, &metadata.join("new.txt")).is_err());
+      assert_eq!(fs::read_to_string(metadata.join("config.toml")).unwrap(), "metadata");
+      assert_eq!(fs::read_to_string(&source).unwrap(), "user content");
+      assert!(!root.path().join("renamed").exists());
+      assert!(!metadata.join("new.txt").exists());
+    }
+  }
+
+  #[test]
+  fn reset_failure_after_partial_restore_preserves_restored_and_empty_files() {
+    let root = tempfile::tempdir().unwrap();
+    let commands = vec![["reset", "--purge", "--", "restored.txt", "empty.txt", "pending.txt"].map(str::to_owned).to_vec()];
+    let attempt = || -> Result<(), String> {
+      let mut paths = prepare_reset_paths(root.path(), &commands)?;
+      paths.begin_reset();
+      fs::write(root.path().join("restored.txt"), "committed content").unwrap();
+      fs::write(root.path().join("empty.txt"), "").unwrap();
+      // Model a command failing or timing out before its remaining targets.
+      Err("reset interrupted".into())
+    };
+    assert!(attempt().is_err());
+    assert_eq!(fs::read_to_string(root.path().join("restored.txt")).unwrap(), "committed content");
+    assert_eq!(fs::read(root.path().join("empty.txt")).unwrap(), b"");
+    // An untouched placeholder cannot safely be distinguished from an empty
+    // restored revision, so it is deliberately left for the next refresh.
+    assert!(root.path().join("pending.txt").is_file());
+  }
+
+  #[test]
+  fn reset_prerequisite_failure_removes_only_new_placeholders() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("existing.txt"), "local edits").unwrap();
+    let commands = vec![["reset", "--", "missing.txt", "existing.txt"].map(str::to_owned).to_vec()];
+    let attempt = || -> Result<(), String> {
+      let _paths = prepare_reset_paths(root.path(), &commands)?;
+      assert!(root.path().join("missing.txt").exists());
+      Err("unstage failed before reset".into())
+    };
+    assert!(attempt().is_err());
+    assert!(!root.path().join("missing.txt").exists());
+    assert_eq!(fs::read_to_string(root.path().join("existing.txt")).unwrap(), "local edits");
+  }
+
+  #[test]
+  fn reset_preparation_failure_rolls_back_previously_created_placeholders() {
+    let root = tempfile::tempdir().unwrap();
+    let commands = vec![["reset", "--", "missing.txt", "invalid\0path"].map(str::to_owned).to_vec()];
+    assert!(prepare_reset_paths(root.path(), &commands).is_err());
+    assert!(!root.path().join("missing.txt").exists());
+  }
+
   #[test]
   fn clone_rejects_occupied_and_relative_destinations_before_launch() {
     let root = tempfile::tempdir().unwrap();

@@ -206,13 +206,13 @@ impl Lens {
     let login_remote = if login { args.get(1).cloned() } else { None };
     let branches = kind == CommandKind::ListBranches;
     let task = cx.background_executor().spawn(async move {
-      let (reset_placeholders, prepare_error) = if resets_files {
+      let (mut reset_paths, prepare_error) = if resets_files {
         match backend::prepare_reset_paths(&root, &commands) {
           Ok(paths) => (paths, None),
-          Err(error) => (Vec::new(), Some(error)),
+          Err(error) => (backend::ResetPaths::default(), Some(error)),
         }
       } else {
-        (Vec::new(), None)
+        (backend::ResetPaths::default(), None)
       };
       let result = prepare_error.map_or_else(
         || {
@@ -226,6 +226,9 @@ impl Lens {
                 }
               }
               let branch_switch = args.first().is_some_and(|arg| arg == "branch") && args.get(1).is_some_and(|arg| arg == "switch");
+              if args.first().is_some_and(|arg| arg == "reset") {
+                reset_paths.begin_reset();
+              }
               let result = if branch_switch {
                 backend::run_branch_switch_skipping_unavailable(&cli, &root, &args, if login { None } else { identity.as_deref() })
               } else if kind.is_global_authentication() {
@@ -254,9 +257,7 @@ impl Lens {
       } else {
         result
       };
-      if result.is_err() {
-        backend::cleanup_reset_paths(&reset_placeholders);
-      }
+      drop(reset_paths);
       let identity_update = if kind.updates_repository_identity() && backend::is_repository(&root) {
         result
           .as_ref()

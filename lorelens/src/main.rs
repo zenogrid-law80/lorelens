@@ -771,42 +771,44 @@ impl Lens {
     cx.spawn(async move |this, cx| {
       let result = task.await;
       let _ = this.update(cx, |this, cx| {
-        if this.file_filter_generation != generation {
-          return;
-        }
+        // This task owns busy regardless of whether a newer search owns the
+        // displayed entries. Always finish loading and the startup connection.
         this.busy = false;
-        match result {
-          Ok(entries) => {
-            this.entries = entries;
-            if let Some(target) = this.folder_to_select.take()
-              && let Some(index) = this.entries.iter().position(|entry| entry.path == target)
-            {
-              let relative = target.strip_prefix(&this.root).unwrap_or(&target).to_string_lossy().replace('\\', "/");
-              if this.entries[index].directory {
-                this.selection.current = Some(relative.clone());
-                this.selection.paths.clear();
-                this.selection.paths.insert(relative.clone());
-                this.selection.anchor = Some(relative);
-              } else {
-                this.select(relative, cx);
+        let loaded = result.is_ok();
+        if this.file_filter_generation == generation {
+          match result {
+            Ok(entries) => {
+              this.entries = entries;
+              if let Some(target) = this.folder_to_select.take()
+                && let Some(index) = this.entries.iter().position(|entry| entry.path == target)
+              {
+                let relative = target.strip_prefix(&this.root).unwrap_or(&target).to_string_lossy().replace('\\', "/");
+                if this.entries[index].directory {
+                  this.selection.current = Some(relative.clone());
+                  this.selection.paths.clear();
+                  this.selection.paths.insert(relative.clone());
+                  this.selection.anchor = Some(relative);
+                } else {
+                  this.select(relative, cx);
+                }
+                this.files_scroll.scroll_to_item(index);
               }
-              this.files_scroll.scroll_to_item(index);
+              this.error = false;
+              this.notice = tf("{count} entries · local filesystem", &[("count", this.entries.len().to_string())]);
             }
-            this.error = false;
-            this.notice = tf("{count} entries · local filesystem", &[("count", this.entries.len().to_string())]);
-            if this.connect_after_load {
-              if this.startup_login_checked {
-                this.connect_after_load = false;
-                this.command(vec!["status".into(), "--scan".into()], "Repository status", true, false, cx);
-              } else if !this.repository_login_checking {
-                this.check_repository_login(cx);
-              }
+            Err(e) => {
+              this.error = true;
+              this.notice = e;
+              this.folder_to_select = None;
             }
           }
-          Err(e) => {
-            this.error = true;
-            this.notice = e;
-            this.folder_to_select = None;
+        }
+        if loaded && this.connect_after_load {
+          if this.startup_login_checked {
+            this.connect_after_load = false;
+            this.command(vec!["status".into(), "--scan".into()], "Repository status", true, false, cx);
+          } else if !this.repository_login_checking {
+            this.check_repository_login(cx);
           }
         }
         cx.notify();
