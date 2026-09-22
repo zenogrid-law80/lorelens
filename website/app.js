@@ -396,6 +396,16 @@ const browserLanguage = preferredLanguages
   .find(language => supportedLanguages.includes(language));
 applyLanguage(supportedLanguages.includes(saved) ? saved : browserLanguage ?? 'en');
 
+const latestReleaseElement = document.querySelector('[data-latest-release]');
+if (latestReleaseElement) {
+  fetch('https://api.github.com/repos/zenogrid-law80/lorelens/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+    .then(response => response.ok ? response.json() : Promise.reject(new Error(`GitHub release request failed: ${response.status}`)))
+    .then(release => {
+      if (release.tag_name && !release.draft && !release.prerelease) latestReleaseElement.textContent = release.tag_name;
+    })
+    .catch(() => { /* Keep the bundled release version when GitHub is unavailable. */ });
+}
+
 document.querySelectorAll('[data-language]').forEach(select => select.addEventListener('change', event => {
   applyLanguage(event.target.value, true);
   updateThemeControl();
