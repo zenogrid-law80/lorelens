@@ -1289,6 +1289,12 @@ select:focus-visible,
   }
 }
 
+@media (max-width: 520px) {
+  .header-actions .button-compact {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

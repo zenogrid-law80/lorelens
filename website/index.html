@@ -15,7 +15,9 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Code:ital@0;1&display=swap">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Symbols:opsz,wght,FILL,GRAD,ROND@20..48,100..700,0..1,-50..200,0..100&display=block">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="demo.css">
   <script src="app.js" defer></script>
+  <script src="demo.js" defer></script>
 </head>
 <body data-page="home">
   <a class="skip" href="#main">Skip to content</a>
@@ -31,6 +33,7 @@
 
       <nav class="header-nav" aria-label="Main navigation">
         <a href="#features">Features</a>
+        <a href="#workspace">Live demo</a>
         <a href="#workflow">Workflow</a>
         <a href="#install">Download</a>
         <a href="docs/api/">Docs</a>
@@ -81,8 +84,8 @@
           <span class="symbol symbol-filled">download</span>
           <span>Download for Windows</span>
         </a>
-        <a class="button button-secondary" href="#features">
-          <span>Explore features</span>
+        <a class="button button-secondary" href="#workspace">
+          <span>Try the demo</span>
           <span class="symbol">arrow_downward</span>
         </a>
       </div>
@@ -104,37 +107,11 @@
         </div>
       </div>
 
-      <!-- App Preview Showcase -->
+      <!-- Interactive sample workspace -->
       <div class="app-showcase" id="workspace">
         <div class="showcase-glow" aria-hidden="true"></div>
-        <div class="showcase-window">
-          <div class="window-bar">
-            <div class="window-dots" aria-hidden="true">
-              <span class="window-dot close"></span>
-              <span class="window-dot min"></span>
-              <span class="window-dot max"></span>
-            </div>
-            <span class="window-title">LoreLens — Your repository, in focus</span>
-            <div class="window-actions">
-              <span class="window-tag">Rust 2024</span>
-            </div>
-          </div>
-
-          <div class="preview-stage">
-            <img class="workspace-image" src="img_black.png" alt="File browser and change details in the LoreLens desktop app">
-            <div class="preview-chip chip-1">
-              <span class="symbol symbol-filled">bolt</span>
-              <span>Native 120 FPS GPUI</span>
-            </div>
-            <div class="preview-chip chip-2">
-              <span class="symbol symbol-filled">shield</span>
-              <span>Local-First &amp; Private</span>
-            </div>
-            <div class="preview-chip chip-3">
-              <span class="symbol symbol-filled">check_circle</span>
-              <span>Instant Hunk Staging</span>
-            </div>
-          </div>
+        <div class="showcase-window" id="demo-root">
+          <img class="workspace-image" src="img_black.png" alt="File browser and change details in the LoreLens desktop app">
         </div>
       </div>
     </section>
