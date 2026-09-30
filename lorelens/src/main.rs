@@ -1590,6 +1590,7 @@ impl Lens {
               });
             }),
           );
+          menu = menus::line_ending_menu(menu, view.clone(), context_root.clone(), selected_paths.clone(), cx);
           if selected_paths.len() > 1 {
             let copy_paths = selected_paths.iter().map(|path| context_root.join(path).to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
             menu = menu.separator().item(PopupMenuItem::new(t("Copy selected full paths")).on_click(move |_, _, cx| {

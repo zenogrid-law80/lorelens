@@ -484,5 +484,8 @@
   "Sync selected revision": "Sync selected revision",
   "Sync to r{revision}": "Sync to r{revision}",
   "Sync this workspace to r{revision}? LoreLens will not use --reset or --force. The selected revision may change the current branch and update local files.": "Sync this workspace to r{revision}? LoreLens will not use --reset or --force. The selected revision may change the current branch and update local files.",
-  "Selected revision is no longer available. Refresh and try again.": "Selected revision is no longer available. Refresh and try again."
+  "Selected revision is no longer available. Refresh and try again.": "Selected revision is no longer available. Refresh and try again.",
+  "Convert line endings to {line_ending}": "Convert line endings to {line_ending}",
+  "Converted line endings in {count} files.": "Converted line endings in {count} files.",
+  "Line-ending conversion requires UTF-8 text: {path}": "Line-ending conversion requires UTF-8 text: {path}"
 }

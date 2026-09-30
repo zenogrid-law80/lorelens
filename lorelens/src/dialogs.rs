@@ -991,9 +991,24 @@ impl Lens {
             .child(
               uniform_list("folder-change-paths", paths.len(), {
                 let paths = paths.clone();
-                move |range, _, _| range.map(|i| div().h(px(24.)).child(paths[i].clone())).collect::<Vec<_>>()
+                move |range, _, _| {
+                  range
+                    .map(|i| {
+                      let path = paths[i].clone();
+                      div()
+                        .id(i)
+                        .h(px(24.))
+                        .w_full()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(path.clone())
+                        .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(path.clone()).build(window, cx))
+                    })
+                    .collect::<Vec<_>>()
+                }
               })
-              .h(px(160.)),
+              .h(px(160.))
+              .w_full(),
             )
             .when(action == "reset" && recursive.get() != Some(2), |d| {
               d.child(t(

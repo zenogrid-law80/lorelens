@@ -1,6 +1,57 @@
 use super::ignore::{load_loreignore, loreignored};
 use super::*;
 
+/// Normalize newlines without changing UTF-8 contents, BOM, or final-newline presence.
+pub fn convert_line_endings(root: &Path, paths: &[String], line_ending: &str) -> Result<usize, String> {
+  let newline: &[u8] = match line_ending {
+    "LF" => b"\n",
+    "CRLF" => b"\r\n",
+    "CR" => b"\r",
+    _ => return Err("Invalid line ending".into()),
+  };
+  let root = root.canonicalize().map_err(|error| error.to_string())?;
+  let mut pending = Vec::new();
+  for relative in paths {
+    let relative = Path::new(relative);
+    if relative.is_absolute() || relative.components().any(|component| !matches!(component, std::path::Component::Normal(_))) {
+      return Err(format!("Invalid file path: {}", relative.display()));
+    }
+    let path = root.join(relative);
+    let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+    let canonical = path.canonicalize().map_err(|error| error.to_string())?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() || !canonical.starts_with(&root) {
+      return Err(format!("Invalid file path: {}", relative.display()));
+    }
+    let original = fs::read(&canonical).map_err(|error| error.to_string())?;
+    if original.contains(&0) || std::str::from_utf8(&original).is_err() {
+      return Err(crate::i18n::tf("Line-ending conversion requires UTF-8 text: {path}", &[("path", relative.display().to_string())]));
+    }
+    let mut converted = Vec::with_capacity(original.len());
+    let mut index = 0;
+    while index < original.len() {
+      match original[index] {
+        b'\r' => {
+          if original.get(index + 1) == Some(&b'\n') {
+            index += 1;
+          }
+          converted.extend_from_slice(newline);
+        }
+        b'\n' => converted.extend_from_slice(newline),
+        byte => converted.push(byte),
+      }
+      index += 1;
+    }
+    if original != converted {
+      pending.push((canonical, converted));
+    }
+  }
+  // Validate every selected file before modifying any of them.
+  for (path, converted) in &pending {
+    fs::write(path, converted).map_err(|error| format!("{}: {error}", path.display()))?;
+  }
+  Ok(pending.len())
+}
+
 /// Validate configured text files before staging without modifying them.
 pub fn validate_text_files(root: &Path, paths: &[String], extensions: &[String], line_ending: &str, encoding: &str) -> Result<(), String> {
   if extensions.is_empty() || (line_ending == "System" && encoding == "System") {
@@ -218,6 +269,26 @@ mod line_ending_tests {
     assert!(validate_text_files(root.path(), &paths, &["txt".into()], "CRLF", "UTF-8 no BOM").is_ok());
     assert!(validate_text_files(root.path(), &paths, &["txt".into()], "LF", "UTF-8").is_err());
     assert_eq!(fs::read(root.path().join("nested/text.txt")).unwrap(), b"first\r\nsecond\r\n");
+  }
+
+  #[test]
+  fn conversion_preserves_bom_contents_and_final_newline_and_validates_batch() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("text.txt");
+    fs::write(&file, b"\xef\xbb\xbfhello\r\nworld\rfinal\nend").unwrap();
+    let paths = vec!["text.txt".into()];
+    assert_eq!(convert_line_endings(root.path(), &paths, "LF").unwrap(), 1);
+    assert_eq!(fs::read(&file).unwrap(), b"\xef\xbb\xbfhello\nworld\nfinal\nend");
+    assert_eq!(convert_line_endings(root.path(), &paths, "LF").unwrap(), 0);
+    assert_eq!(convert_line_endings(root.path(), &paths, "CRLF").unwrap(), 1);
+    let before = fs::read(&file).unwrap();
+    assert_eq!(before, b"\xef\xbb\xbfhello\r\nworld\r\nfinal\r\nend");
+    fs::write(root.path().join("binary.txt"), b"binary\0\n").unwrap();
+    assert!(convert_line_endings(root.path(), &["text.txt".into(), "binary.txt".into()], "LF").is_err());
+    assert_eq!(fs::read(&file).unwrap(), before);
+    assert!(convert_line_endings(root.path(), &["../outside.txt".into()], "LF").is_err());
+    assert_eq!(convert_line_endings(root.path(), &paths, "CR").unwrap(), 1);
+    assert_eq!(fs::read(&file).unwrap(), b"\xef\xbb\xbfhello\rworld\rfinal\rend");
   }
 
   #[test]

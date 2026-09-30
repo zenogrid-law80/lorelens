@@ -484,5 +484,8 @@
   "Sync selected revision": "同步到所选修订版本",
   "Sync to r{revision}": "同步到 r{revision}",
   "Sync this workspace to r{revision}? LoreLens will not use --reset or --force. The selected revision may change the current branch and update local files.": "要将此工作区同步到 r{revision} 吗？LoreLens 不会使用 --reset 或 --force。所选修订版本可能会更改当前分支并更新本地文件。",
-  "Selected revision is no longer available. Refresh and try again.": "所选修订版本已不可用。请刷新后重试。"
+  "Selected revision is no longer available. Refresh and try again.": "所选修订版本已不可用。请刷新后重试。",
+  "Convert line endings to {line_ending}": "将换行符转换为 {line_ending}",
+  "Converted line endings in {count} files.": "已转换 {count} 个文件的换行符。",
+  "Line-ending conversion requires UTF-8 text: {path}": "换行符转换需要 UTF-8 文本：{path}"
 }

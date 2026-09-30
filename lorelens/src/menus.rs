@@ -1,5 +1,64 @@
 use super::*;
 
+pub(super) fn line_ending_menu(mut menu: gpui_component::menu::PopupMenu, view: WeakEntity<Lens>, root: PathBuf, paths: Vec<String>, cx: &App) -> gpui_component::menu::PopupMenu {
+  let Some(entity) = view.upgrade() else { return menu };
+  let lens = entity.read(cx);
+  if lens.root != root
+    || paths.is_empty()
+    || !paths.iter().all(|path| {
+      let file = root.join(path);
+      file.is_file()
+        && file
+          .extension()
+          .and_then(|extension| extension.to_str())
+          .is_some_and(|extension| lens.settings.text_extensions.iter().any(|configured| configured.eq_ignore_ascii_case(extension)))
+    })
+  {
+    return menu;
+  }
+  let ready = !lens.busy;
+  let line_ending = lens.settings.text_line_ending.clone();
+  menu = menu.item(
+    PopupMenuItem::new(tf("Convert line endings to {line_ending}", &[("line_ending", line_ending.clone())]))
+      .disabled(!ready)
+      .on_click(move |_, _, cx| {
+        let _ = view.update(cx, |this, cx| {
+          if this.busy || this.root != root || this.settings.text_line_ending != line_ending {
+            return;
+          }
+          let target = if line_ending == "System" { if cfg!(windows) { "CRLF" } else { "LF" } } else { &line_ending };
+          let target = target.to_string();
+          let task_root = root.clone();
+          let task_paths = paths.clone();
+          this.busy = true;
+          cx.notify();
+          let task = cx.background_executor().spawn(async move { backend::convert_line_endings(&task_root, &task_paths, &target) });
+          cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+              this.busy = false;
+              this.preview.invalidate();
+              this.refresh(cx);
+              match result {
+                Ok(count) => {
+                  this.error = false;
+                  this.notice = tf("Converted line endings in {count} files.", &[("count", count.to_string())]);
+                }
+                Err(error) => {
+                  this.error = true;
+                  this.notice = error;
+                }
+              }
+              cx.notify();
+            });
+          })
+          .detach();
+        });
+      }),
+  );
+  menu
+}
+
 impl Lens {
   pub(super) fn bookmark_toggle(&self, cx: &mut Context<Self>) -> Button {
     let view = cx.entity().downgrade();

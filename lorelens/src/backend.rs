@@ -110,8 +110,8 @@ pub fn is_repository(root: &Path) -> bool {
   root.join(".lore").is_dir() || root.join(".urc").is_dir()
 }
 pub use filesystem::{
-  SpreadsheetSheet, copy_entries, delete_entry, is_fbx_path, is_image_path, is_spreadsheet_path, is_unreal_asset_path, list_directory, preview, preview_spreadsheet, preview_unreal_asset,
-  render_fbx_preview, syntax_language, validate_text_files,
+  SpreadsheetSheet, convert_line_endings, copy_entries, delete_entry, is_fbx_path, is_image_path, is_spreadsheet_path, is_unreal_asset_path, list_directory, preview, preview_spreadsheet,
+  preview_unreal_asset, render_fbx_preview, syntax_language, validate_text_files,
 };
 
 /// Roll back placeholders only until a reset command can have written to them.

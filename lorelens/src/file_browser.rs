@@ -339,7 +339,7 @@ impl Lens {
                       .iter()
                       .any(|path| same_change_path(&change.path, path) || (lens.root.join(path).is_dir() && change_path_is_within(&change.path, path)))
                 });
-                let mut menu = menu;
+                let mut menu = menus::line_ending_menu(menu, view.clone(), context_root.clone(), selected_paths.clone(), cx);
                 for (action, label) in [("stage", "Stage selected"), ("unstage", "Unstage selected"), ("reset", "Reset selected files")] {
                   let paths: Vec<_> = changes
                     .iter()
@@ -468,7 +468,7 @@ impl Lens {
                 let lens = entity.read(cx);
                 !lens.busy && lens.connected && lens.root == context_root
               });
-              let mut menu = menu;
+              let mut menu = menus::line_ending_menu(menu, view.clone(), context_root.clone(), selected_paths.clone(), cx);
               if selected_paths.len() > 1 {
                 let copy_paths = selected_paths.iter().map(|path| context_root.join(path).to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
                 menu = menu.item(PopupMenuItem::new(t("Copy selected full paths")).on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy_paths.clone()))));
