@@ -952,7 +952,6 @@ impl Render for Lens {
           .child(div().flex_1().overflow_hidden().text_ellipsis().child(t(&self.notice)))
           .child(concat!("Rust + GPUI · LoreLens v", env!("CARGO_PKG_VERSION"))),
       )
-      .children(Root::render_dialog_layer(window, cx))
       .when(self.busy && !self.silent_refresh && !self.progress_popup_dismissed, |view| {
         view.child(
           div()
