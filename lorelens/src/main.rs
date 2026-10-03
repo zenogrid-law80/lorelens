@@ -1838,6 +1838,11 @@ fn main() {
       WindowOptions {
         window_bounds: Some(window_bounds),
         window_min_size: Some(size(px(1000.), px(700.))),
+        window_background: if cfg!(target_os = "windows") {
+          WindowBackgroundAppearance::Blurred
+        } else {
+          WindowBackgroundAppearance::Opaque
+        },
         titlebar: Some(TitlebarOptions {
           title: Some(t("LoreLens — Desktop repository client").into()),
           ..TitleBar::title_bar_options()
