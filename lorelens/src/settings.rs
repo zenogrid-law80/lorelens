@@ -29,6 +29,7 @@ pub struct Settings {
   pub window_fullscreen: bool,
   pub splitter_sizes: std::collections::BTreeMap<String, f32>,
   pub auto_refresh: bool,
+  pub check_for_updates: bool,
   pub text_line_ending: String,
   pub text_encoding: String,
   pub text_extensions: Vec<String>,
@@ -64,6 +65,7 @@ impl Default for Settings {
       window_fullscreen: false,
       splitter_sizes: Default::default(),
       auto_refresh: true,
+      check_for_updates: true,
       text_line_ending: "LF".into(),
       text_encoding: "UTF-8 no BOM".into(),
       text_extensions: default_text_extensions(),
@@ -201,6 +203,7 @@ impl Settings {
       window_fullscreen: data["window_fullscreen"].as_bool().unwrap_or(false),
       splitter_sizes: serde_json::from_value(data.get("splitter_sizes").cloned().unwrap_or(json!({})))?,
       auto_refresh: data["auto_refresh"].as_bool().unwrap_or(true),
+      check_for_updates: data["check_for_updates"].as_bool().unwrap_or(true),
       text_line_ending: match data["text_line_ending"].as_str().unwrap_or("LF") {
         value @ ("LF" | "CR" | "CRLF") => value.into(),
         _ => "LF".into(),
@@ -366,7 +369,7 @@ impl Settings {
       .collect();
     serde_json::to_writer_pretty(
       &mut file,
-      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "custom_tool_name": self.custom_tool_name, "custom_tool_path": self.custom_tool_path, "custom_tool_arguments": self.custom_tool_arguments, "recent": Self::normalized_recent(self.recent.clone()), "bookmarks": bookmarks, "cli": self.cli, "theme": self.theme, "show_command_log": self.show_command_log, "window_maximized": self.window_maximized, "window_fullscreen": self.window_fullscreen, "splitter_sizes": self.splitter_sizes, "auto_refresh": self.auto_refresh, "text_line_ending": self.text_line_ending, "text_encoding": self.text_encoding, "text_extensions": Self::normalize_extensions(self.text_extensions.clone()), "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
+      &json!({"shortcuts": self.shortcuts, "login_remote": self.login_remote, "login_urls": self.login_urls, "language": self.language, "tool_paths": self.tool_paths, "external_tool": self.external_tool, "custom_tool_name": self.custom_tool_name, "custom_tool_path": self.custom_tool_path, "custom_tool_arguments": self.custom_tool_arguments, "recent": Self::normalized_recent(self.recent.clone()), "bookmarks": bookmarks, "cli": self.cli, "theme": self.theme, "show_command_log": self.show_command_log, "window_maximized": self.window_maximized, "window_fullscreen": self.window_fullscreen, "splitter_sizes": self.splitter_sizes, "auto_refresh": self.auto_refresh, "check_for_updates": self.check_for_updates, "text_line_ending": self.text_line_ending, "text_encoding": self.text_encoding, "text_extensions": Self::normalize_extensions(self.text_extensions.clone()), "identity": self.identity, "create_url": self.create_url, "create_destination": self.create_destination, "create_urls": self.create_urls, "create_destinations": self.create_destinations, "clone_url": self.clone_url, "clone_destination": self.clone_destination, "clone_urls": self.clone_urls, "clone_destinations": self.clone_destinations}),
     )?;
     file.sync_all()?;
     drop(file);
@@ -403,6 +406,31 @@ mod tests {
     settings.show_command_log = false;
     settings.save(&path).unwrap();
     assert!(!Settings::load(&path).unwrap().show_command_log);
+  }
+
+  #[test]
+  fn update_checks_default_to_enabled_and_survive_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    assert!(Settings::load(&path).unwrap().check_for_updates);
+
+    // Existing settings from before update checks were introduced keep the default.
+    fs::write(&path, r#"{"auto_refresh":false}"#).unwrap();
+    let mut settings = Settings::load(&path).unwrap();
+    assert!(settings.check_for_updates);
+    assert!(!settings.auto_refresh);
+
+    settings.check_for_updates = false;
+    settings.save(&path).unwrap();
+    let mut restarted = Settings::load(&path).unwrap();
+    assert!(!restarted.check_for_updates);
+    restarted.theme = crate::theme::LIGHT_THEME.into();
+    restarted.save(&path).unwrap();
+    assert!(!Settings::load(&path).unwrap().check_for_updates);
+
+    restarted.check_for_updates = true;
+    restarted.save(&path).unwrap();
+    assert!(Settings::load(&path).unwrap().check_for_updates);
   }
 
   #[test]

@@ -9,6 +9,7 @@ mod ignore;
 mod obliterate;
 mod reset;
 pub mod sparse;
+pub mod updates;
 pub use binary_merge::{MergeInputs, MergeSide, merge_inputs, select_merge_sides};
 pub fn list_tree(root: &Path, expanded: &std::collections::HashSet<PathBuf>) -> Result<Vec<Entry>, String> {
   fn walk(root: &Path, dir: &Path, expanded: &std::collections::HashSet<PathBuf>, result: &mut Vec<Entry>) -> Result<(), String> {

@@ -22,6 +22,7 @@ mod remote_history;
 mod settings;
 mod shortcuts;
 mod sparse_editor;
+mod updates;
 mod view;
 use i18n::{t, tf};
 
@@ -183,6 +184,7 @@ struct Lens {
   show_log: bool,
   obliterate_enabled: bool,
   settings: settings::Settings,
+  updates: Entity<updates::UpdatesView>,
   settings_error: Option<String>,
   branch_output: String,
   local_branches: Vec<String>,
@@ -473,6 +475,8 @@ impl Lens {
     let pending_filter = cx.new(|cx| TextInput::new("Filter changes…", cx).with_icon(IconName::Search));
     cx.observe(&pending_filter, |_, _, cx| cx.notify()).detach();
     let selected_path = cx.new(|cx| TextInput::new("", cx).read_only());
+    let parent = cx.entity().downgrade();
+    let updates = cx.new(|cx| updates::UpdatesView::new(parent, settings.check_for_updates, cx));
     let mut view = Self {
             files_focus: cx.focus_handle(),
             pending_focus: cx.focus_handle(),
@@ -493,7 +497,7 @@ impl Lens {
             message: cx.new(|cx| CommitMessage::new(window, cx)),
             pending_folder_focus: None,
             filter, pending_filter, change_state_filter: ChangeStateFilter::All, selected_path, pending_visible: Vec::new(), pending_rows: Vec::new(), notice: "Opening repository…".into(), error: false, show_log, obliterate_enabled: false,
-            settings, settings_error, branch_output: String::new(), show_branches: false,
+            settings, updates, settings_error, branch_output: String::new(), show_branches: false,
             connect_after_load,
             startup_login_checked: !connect_after_load,
             repository_login_checking: false,

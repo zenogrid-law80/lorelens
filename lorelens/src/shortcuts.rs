@@ -241,10 +241,18 @@ impl Lens {
     let encoding = self.settings.text_encoding.clone();
     let extension_count = self.settings.text_extensions.len();
     let ready = !self.busy;
+    let updates_label = self
+      .updates
+      .read(cx)
+      .available_version()
+      .map(|version| tf("Updates · {version}", &[("version", version.to_owned())]))
+      .unwrap_or_else(|| t("Updates…"));
+    let update_available = self.updates.read(cx).available_version().is_some();
     Button::new("options-menu")
       .border_0()
       .ghost()
       .label(format!("{} ▾", t("Options")))
+      .when(update_available, |button| button.icon(IconName::ArrowDown))
       .dropdown_menu(move |menu, window, cx| {
         let refresh_view = view.clone();
         let menu = menu
@@ -336,7 +344,11 @@ impl Lens {
           .separator();
         let bookmark_view = view.clone();
         let settings_view = view.clone();
+        let updates_view = view.clone();
         menu
+          .item(PopupMenuItem::new(updates_label.clone()).on_click(move |_, window, cx| {
+            let _ = updates_view.update(cx, |this, cx| this.updates_dialog(window, cx));
+          }))
           .item(PopupMenuItem::new(t("Manage bookmarks…")).on_click(move |_, window, cx| {
             let _ = bookmark_view.update(cx, |this, cx| this.bookmarks_dialog(window, cx));
           }))
