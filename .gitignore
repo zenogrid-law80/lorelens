@@ -1,6 +1,17 @@
 /target
 /.lorelens
 /.idea
+/.claude
+/.codebuddy
+/.codegraph
+/.gemini
+/.github/instructions
+/.kiro
+/.qoder
+/.cursorrules
+/.mcp.json
+/.windsurfrules
+/opencode.jsonc
 /.tools
 Cargo.lock
 /dist
