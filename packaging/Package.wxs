@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package
     Name="LoreLens"
     Manufacturer="ZenoGrid Co., Ltd."
@@ -15,6 +16,27 @@
       Schedule="afterInstallInitialize"
       DowngradeErrorMessage="A newer version of LoreLens is already installed." />
     <MediaTemplate EmbedCab="yes" />
+
+    <!-- Close the app before files-in-use validation and before MajorUpgrade
+         removes the old product. Keep this action immediate-only: deferred
+         close/reboot/termination options cannot run before InstallInitialize. -->
+    <util:CloseApplication
+      Id="CloseLoreLens"
+      Target="lorelens.exe"
+      Condition="NOT UPGRADINGPRODUCTCODE"
+      Description="LoreLens is running. Finish any operations, then close LoreLens and select Retry. Select Ignore to let setup close LoreLens, or Abort to cancel setup."
+      PromptToContinue="yes"
+      CloseMessage="yes"
+      RebootPrompt="no"
+      Timeout="15"
+      Property="LORELENS_RUNNING" />
+    <CustomAction
+      Id="FailIfLoreLensRunning"
+      Error="LoreLens is still running. Close all LoreLens windows and run setup again." />
+    <InstallExecuteSequence>
+      <Custom Action="override Wix4CloseApplications_$(sys.BUILDARCHSHORT)" Before="InstallValidate" Condition="VersionNT &gt; 400 AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="FailIfLoreLensRunning" After="Wix4CloseApplications_$(sys.BUILDARCHSHORT)" Condition="LORELENS_RUNNING AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="LoreLens">

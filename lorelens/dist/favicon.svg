@@ -3,8 +3,8 @@
      xmlns:xlink="http://www.w3.org/1999/xlink"
      width="256" height="256" viewBox="0 0 256 256"
      role="img" aria-labelledby="title desc">
-  <title id="title">Black atom logo on transparent background</title>
-  <desc id="desc">The light logo from the source image recolored black, with the dark background removed.</desc>
+  <title id="title">LoreLens atom logo</title>
+  <desc id="desc">The gold (#F5C45E) LoreLens logo on a transparent background.</desc>
   <defs>
     <filter id="recolor-and-remove-background"
             x="-5%" y="-5%" width="110%" height="110%"
@@ -14,9 +14,11 @@
                 0 0 0 0 0
                 0 0 0 0 0
                 0.2126 0.7152 0.0722 0 0"/>
-      <feComponentTransfer>
-        <feFuncA type="linear" slope="2" intercept="-0.32"/>
+      <feComponentTransfer result="logo-mask">
+        <feFuncA type="linear" slope="2" intercept="-0.5"/>
       </feComponentTransfer>
+      <feFlood flood-color="#F5C45E" result="logo-gold"/>
+      <feComposite in="logo-gold" in2="logo-mask" operator="in"/>
     </filter>
   </defs>
   <image x="0" y="0" width="256" height="256"

@@ -1,15 +1,15 @@
 [package]
 name = "lorelens"
-version = "0.1.35"
+version = "0.1.36"
 edition = "2024"
 description = "Lore desktop client built with GPUI"
 license = "MIT"
 
 [dependencies]
-gpui = { package = "gpui-pre", version = "=0.3.7" }
+gpui = { package = "gpui-pre", version = "=0.3.8" }
 # macOS requires font-kit; without it GPUI uses a text system that renders no glyphs.
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.7", features = ["font-kit"] }
-    gpui-component = { version = "=0.7.0", features = [
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit"] }
+    gpui-component = { version = "=0.7.1", features = [
         "tree-sitter-bash",
         "tree-sitter-cpp",
         "tree-sitter-csharp",
@@ -30,12 +30,12 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.7", features = 
         "tree-sitter-yaml",
         "tree-sitter-zig"
     ] }
-gpui-kit-assets = "=0.7.0"
-calamine = "0.34"
+gpui-kit-assets = "=0.7.1"
+calamine = "0.36.1"
 serde_json = "1"
-reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "rustls-tls"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "rustls"] }
 semver = "1"
-sha2 = "0.10"
+sha2 = "0.11.0"
 toml_edit = "0.25"
 tempfile = "3"
 unicode-segmentation = "1"

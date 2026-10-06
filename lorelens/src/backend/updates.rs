@@ -251,6 +251,16 @@ fn installer_tag(release: &Release, asset: &Asset) -> Result<String, String> {
   Ok(tag)
 }
 
+fn sha256_hex(hash: Sha256) -> String {
+  use std::fmt::Write as _;
+
+  let mut hex = String::with_capacity(64);
+  for byte in hash.finalize() {
+    write!(&mut hex, "{byte:02x}").expect("writing to a String is infallible");
+  }
+  hex
+}
+
 fn write_verified(reader: impl Read, file: &mut File, size: u64, expected: &str) -> Result<(), String> {
   let mut reader = reader.take(size + 1);
   let mut hash = Sha256::new();
@@ -268,7 +278,7 @@ fn write_verified(reader: impl Read, file: &mut File, size: u64, expected: &str)
     hash.update(&buffer[..count]);
     file.write_all(&buffer[..count]).map_err(|error| error.to_string())?;
   }
-  if written != size || !format!("{:x}", hash.finalize()).eq_ignore_ascii_case(expected) {
+  if written != size || !sha256_hex(hash).eq_ignore_ascii_case(expected) {
     return Err(t("Installer checksum or size verification failed"));
   }
   file.sync_all().map_err(|error| error.to_string())
@@ -289,7 +299,7 @@ fn verify_staged(path: &Path, installer: &StagedInstaller) -> Result<(), String>
     }
     hash.update(&buffer[..count]);
   }
-  if format!("{:x}", hash.finalize()) != installer.sha256 {
+  if sha256_hex(hash) != installer.sha256 {
     return Err(t("The staged installer changed after download"));
   }
   Ok(())
@@ -509,9 +519,16 @@ mod tests {
   }
 
   #[test]
+  fn sha256_hex_preserves_known_digest_and_leading_zeroes() {
+    let mut hash = Sha256::new();
+    hash.update(b"abc");
+    assert_eq!(sha256_hex(hash), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  }
+
+  #[test]
   fn verifies_download_size_hash_and_staged_changes() {
     let bytes = b"verified installer";
-    let hash = format!("{:x}", Sha256::digest(bytes));
+    let hash = "2b3259d45e6f60a32d17ab3a9f417da8c68726318ef5dd738e837a51d5a91586".to_owned();
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("LoreLens-1.0.0.msi");
     let mut file = File::create(&path).unwrap();
