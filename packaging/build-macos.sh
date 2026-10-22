@@ -20,10 +20,16 @@ TARGET_DIR="$(cargo metadata --no-deps --format-version 1 | /usr/bin/plutil -ext
 APP="$ROOT/dist/LoreLens.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$TARGET_DIR/$PROFILE/lorelens" "$APP/Contents/MacOS/LoreLens"
-# Match the bundled CLI path resolved relative to the app executable.
-mkdir -p "$APP/Contents/MacOS/dis"
-cp "$ROOT/lorelens/dist/lore" "$APP/Contents/MacOS/dis/lore"
-chmod +x "$APP/Contents/MacOS/dis/lore"
+# Match the bundled CLI path resolved relative to the app executable when available.
+if [[ -f "$ROOT/lorelens/dist/lore" ]]; then
+    mkdir -p "$APP/Contents/MacOS/dis"
+    cp "$ROOT/lorelens/dist/lore" "$APP/Contents/MacOS/dis/lore"
+    chmod +x "$APP/Contents/MacOS/dis/lore"
+else
+    # Do not carry a CLI from an earlier build into this app.
+    rm -f "$APP/Contents/MacOS/dis/lore"
+    echo "Building without a bundled Lore CLI; use Locate CLI or lore on PATH." >&2
+fi
 
 ICON_TMP="$(mktemp -d)"
 trap 'rm -rf "$ICON_TMP"' EXIT
@@ -53,6 +59,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </dict></plist>
 EOF
 plutil -lint "$APP/Contents/Info.plist"
-codesign --force --sign - "$APP/Contents/MacOS/dis/lore"
+if [[ -f "$APP/Contents/MacOS/dis/lore" ]]; then
+    codesign --force --sign - "$APP/Contents/MacOS/dis/lore"
+fi
 codesign --force --sign - "$APP"
 echo "Built $APP"

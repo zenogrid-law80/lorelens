@@ -9,7 +9,7 @@ bash packaging/build-macos.sh
 open dist/LoreLens.app
 ```
 
-`dist/LoreLens.app`에 실행 파일, macOS Lore CLI, `favicon.ico`에서 생성한 다중 해상도 ICNS 아이콘을 포함합니다. 로컬 실행을 위한 ad-hoc 서명을 적용하며, 외부 배포용 Developer ID 서명과 공증은 별도입니다.
+`dist/LoreLens.app`에 실행 파일과 `favicon.ico`에서 생성한 다중 해상도 ICNS 아이콘을 포함합니다. `lorelens/dist/lore`에 macOS Lore CLI가 있으면 함께 번들하고, 없으면 CLI 없이 앱을 만듭니다. CLI가 없는 앱에서도 로컬 파일 탐색과 미리보기를 사용할 수 있으며, VCS 작업은 `Locate CLI…`, `LORELENS_LORE_BIN` 또는 `PATH`의 `lore`로 연결합니다. 로컬 실행을 위한 ad-hoc 서명을 적용하며, 외부 배포용 Developer ID 서명과 공증은 별도입니다.
 
 빠른 개발 빌드는 `bash packaging/build-macos.sh debug`로 만듭니다. `cargo run`으로 직접 실행해도 내장 아이콘을 사용해 Dock 아이콘을 설정합니다.
 
@@ -19,6 +19,14 @@ DMG 설치 이미지는 다음 명령으로 생성합니다. 앱을 Applications
 bash packaging/build-dmg.sh
 # Apple Silicon: dist/LoreLens-0.1.2-macos-arm64.dmg
 ```
+
+## GitHub Actions에서 macOS 빌드
+
+`.github/workflows/macos.yml`의 **Build macOS** 워크플로는 Apple Silicon(`arm64`, `macos-15`)과 Intel(`x86_64`, `macos-15-intel`)에서 각각 release 앱과 DMG를 만듭니다. Xcode 16.4와 Metal 컴파일러를 준비하고, 빌드 후 실행 파일의 아키텍처와 앱의 ad-hoc 서명을 검증합니다.
+
+앱 소스, 번역, Cargo 설정, macOS 패키징 스크립트 또는 워크플로 변경 시 `main` 푸시와 PR에서 실행합니다. `v*` 태그 푸시 및 **Actions → Build macOS → Run workflow** 수동 실행도 지원합니다.
+
+성공한 실행의 **Artifacts**에서 `LoreLens-macos-arm64` 또는 `LoreLens-macos-x86_64`를 내려받으면 DMG와 SHA-256 체크섬이 포함됩니다. 보관 기간은 14일이며, GitHub Release에는 자동 게시하지 않습니다. 저장소에 Lore CLI 바이너리가 없으므로 기본 CI 빌드에는 CLI가 포함되지 않습니다. Developer ID 서명과 공증도 수행하지 않습니다.
 
 # MSI 패키지 만들기
 

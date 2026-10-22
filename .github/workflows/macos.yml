@@ -1,0 +1,104 @@
+name: Build macOS
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+    paths:
+      - ".github/workflows/macos.yml"
+      - "Cargo.toml"
+      - "lorelens/**"
+      - "i18n/**"
+      - "packaging/build-macos.sh"
+      - "packaging/build-dmg.sh"
+  pull_request:
+    paths:
+      - ".github/workflows/macos.yml"
+      - "Cargo.toml"
+      - "lorelens/**"
+      - "i18n/**"
+      - "packaging/build-macos.sh"
+      - "packaging/build-dmg.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep the GPUI build within the memory available on Apple Silicon runners.
+  CARGO_BUILD_JOBS: 2
+  DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+
+jobs:
+  build:
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Prepare Xcode and Metal
+        run: |
+          xcodebuild -version
+          if ! xcrun --sdk macosx metal --version; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun --sdk macosx metal --version
+          xcrun --sdk macosx --find metallib
+          echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-${{ matrix.arch }}
+
+      - name: Build app and DMG
+        run: bash packaging/build-dmg.sh
+
+      - name: Verify app
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          lipo -verify_arch "$EXPECTED_ARCH" dist/LoreLens.app/Contents/MacOS/LoreLens
+          codesign --verify --deep --strict --verbose=2 dist/LoreLens.app
+
+      - name: Create checksums
+        working-directory: dist
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: shasum -a 256 LoreLens-*-macos-"$ARCH".dmg > "SHA256SUMS-macos-$ARCH.txt"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LoreLens-macos-${{ matrix.arch }}
+          path: |
+            dist/LoreLens-*-macos-${{ matrix.arch }}.dmg
+            dist/SHA256SUMS-macos-${{ matrix.arch }}.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
