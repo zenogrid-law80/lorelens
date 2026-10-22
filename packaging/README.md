@@ -60,6 +60,14 @@ PowerShell에서 프로젝트 루트 기준으로 실행합니다.
 .\packaging\build-msi.ps1 -SkipBuild
 ```
 
+## GitHub Actions에서 Windows 빌드
+
+`.github/workflows/windows.yml`의 **Build Windows** 워크플로는 `windows-2022`에서 MSVC x64 release 앱과 MSI를 만듭니다. MSVC 빌드 환경, stable Rust, WiX 실행용 .NET 8을 준비하고 기존 `packaging/build-msi.ps1`을 실행합니다. WiX 6.0.2와 Util 확장은 패키징 스크립트에서 설치합니다.
+
+앱 소스, 번역, Cargo 설정, MSI 패키징 스크립트·정의 또는 워크플로 변경 시 `main` 푸시와 PR에서 실행합니다. `v*` 태그 푸시 및 **Actions → Build Windows → Run workflow** 수동 실행도 지원합니다.
+
+성공한 실행의 **Artifacts**에서 `LoreLens-windows-x64`를 내려받으면 `LoreLens-<버전>.msi`와 `SHA256SUMS-v<버전>.txt`가 포함됩니다. 체크섬은 앱의 자체 업데이트와 같은 SHA-256 형식을 사용합니다. 보관 기간은 14일이며, GitHub Release에는 자동 게시하지 않습니다.
+
 # 앱에서 자체 업데이트
 
 **옵션 → 업데이트**에서 현재 버전, 새 버전과 변경 이력을 확인합니다. **시작 시 업데이트 확인**은 기본으로 켜져 있으며 앱을 시작할 때 최신 안정 릴리스가 있는지만 확인합니다. 다운로드와 설치는 자동으로 실행하지 않습니다. **업데이트 확인**으로 언제든 다시 확인할 수 있습니다.

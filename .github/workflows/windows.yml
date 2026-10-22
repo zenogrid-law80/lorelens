@@ -1,0 +1,92 @@
+name: Build Windows
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+    paths:
+      - ".github/workflows/windows.yml"
+      - "Cargo.toml"
+      - "lorelens/**"
+      - "i18n/**"
+      - "packaging/build-msi.ps1"
+      - "packaging/Package.wxs"
+  pull_request:
+    paths:
+      - ".github/workflows/windows.yml"
+      - "Cargo.toml"
+      - "lorelens/**"
+      - "i18n/**"
+      - "packaging/build-msi.ps1"
+      - "packaging/Package.wxs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 2
+
+jobs:
+  build:
+    name: Windows (x64)
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Prepare MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install .NET for WiX
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup default stable-x86_64-pc-windows-msvc
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-x64
+
+      - name: Build app and MSI
+        run: ./packaging/build-msi.ps1
+
+      - name: Create checksums
+        run: |
+          $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $version = ($metadata.packages | Where-Object name -eq 'lorelens').version
+          if (-not $version) { throw 'LoreLens package version was not found' }
+          $msi = Get-Item -LiteralPath "dist/LoreLens-$version.msi"
+          $hash = (Get-FileHash -LiteralPath $msi.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($msi.Name)" | Set-Content -LiteralPath "dist/SHA256SUMS-v$version.txt" -Encoding ascii
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LoreLens-windows-x64
+          path: |
+            dist/LoreLens-*.msi
+            dist/SHA256SUMS-v*.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
