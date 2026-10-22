@@ -83,7 +83,7 @@ jobs:
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
         run: |
-          lipo -verify_arch "$EXPECTED_ARCH" dist/LoreLens.app/Contents/MacOS/LoreLens
+          lipo dist/LoreLens.app/Contents/MacOS/LoreLens -verify_arch "$EXPECTED_ARCH"
           codesign --verify --deep --strict --verbose=2 dist/LoreLens.app
 
       - name: Create checksums
