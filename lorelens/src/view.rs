@@ -141,13 +141,13 @@ impl Lens {
     let Some(row) = self.pending_rows.get(index).cloned() else { return };
     self.pending_folder_focus = None;
     if let Some(change_index) = row.change_index() {
-      let path = self.status.changes[change_index].path.clone();
+      let path = self.pending_changes[change_index].path.clone();
       if range {
         let visible: Vec<_> = self
           .pending_rows
           .iter()
           .filter_map(|row| row.change_index())
-          .map(|index| self.status.changes[index].path.clone())
+          .map(|index| self.pending_changes[index].path.clone())
           .collect();
         self.selection.click(path, &visible, false, true);
         self.preview.invalidate();
@@ -176,7 +176,7 @@ impl Lens {
       if self.busy {
         return;
       }
-      let visible: Vec<_> = self.pending_visible.iter().map(|index| self.status.changes[*index].path.clone()).collect();
+      let visible: Vec<_> = self.pending_visible.iter().map(|index| self.pending_changes[*index].path.clone()).collect();
       self.pending_folder_focus = None;
       self.selection.select_all(&visible);
       self.preview.invalidate();
@@ -195,7 +195,7 @@ impl Lens {
       if let Some(folder) = &self.pending_folder_focus {
         matches!(row, PendingTreeRow::Folder { path, .. } if path == folder)
       } else {
-        row.change_index().is_some_and(|index| self.selection.current.as_ref() == Some(&self.status.changes[index].path))
+        row.change_index().is_some_and(|index| self.selection.current.as_ref() == Some(&self.pending_changes[index].path))
       }
     });
     let filtering = !self.pending_filter.read(cx).content.is_empty();
@@ -278,9 +278,10 @@ impl Render for Lens {
     }
     let pending_query = self.pending_filter.read(cx).content.to_lowercase().to_string();
     let state_filter = self.change_state_filter;
+    let locked_paths: std::collections::HashSet<_> = self.locked_paths.iter().map(|path| state::pending_path_key(path)).collect();
+    self.pending_changes = state::pending_display_changes(&self.status.changes, &self.locked_paths, state_filter == ChangeStateFilter::Locked);
     self.pending_visible = self
-      .status
-      .changes
+      .pending_changes
       .iter()
       .enumerate()
       .filter(|(_, change)| {
@@ -293,17 +294,18 @@ impl Render for Lens {
           ChangeStateFilter::All => true,
           ChangeStateFilter::Staged => change.staged,
           ChangeStateFilter::Unstaged => !change.staged,
+          ChangeStateFilter::Locked => locked_paths.contains(&state::pending_path_key(&change.path)),
         };
         text_matches && state_matches
       })
       .map(|(index, _)| index)
       .collect();
     self.pending_rows = if pending_query.is_empty() {
-      state::pending_tree_rows(&self.status.changes, &self.pending_visible, &self.collapsed_change_folders)
+      state::pending_tree_rows(&self.pending_changes, &self.pending_visible, &self.collapsed_change_folders)
     } else {
-      state::pending_tree_rows(&self.status.changes, &self.pending_visible, &Default::default())
+      state::pending_tree_rows(&self.pending_changes, &self.pending_visible, &Default::default())
     };
-    let visible_paths: Vec<_> = self.pending_visible.iter().map(|index| self.status.changes[*index].path.clone()).collect();
+    let visible_paths: Vec<_> = self.pending_visible.iter().map(|index| self.pending_changes[*index].path.clone()).collect();
     let all_visible_selected = !visible_paths.is_empty() && visible_paths.iter().all(|path| self.selection.paths.contains(path));
     let visible_count = visible_paths.len();
     let mut pending = div()
@@ -331,7 +333,7 @@ impl Render for Lens {
             range
               .map(|i| match this.pending_rows[i].clone() {
                 row @ PendingTreeRow::Folder { .. } => this.pending_folder_row(i, row, window_active, cx),
-                PendingTreeRow::Change { index, name, depth } => this.change_row(index, &this.status.changes[index], &name, depth, window_active, cx),
+                PendingTreeRow::Change { index, name, depth } => this.change_row(index, &this.pending_changes[index], &name, depth, window_active, cx),
               })
               .collect::<Vec<_>>()
           }),
@@ -349,6 +351,12 @@ impl Render for Lens {
         ("Working…", "Scanning for changes…")
       } else if self.error {
         ("Changes unavailable", "Refresh to scan for changes. See the command log for details.")
+      } else if state_filter == ChangeStateFilter::Locked {
+        if pending_query.is_empty() {
+          ("No locked files.", "Locked files on the current branch will appear here.")
+        } else {
+          ("No matching locked files.", "Try a different filter to find locked files.")
+        }
       } else if !self.status.changes.is_empty() {
         ("No matching changes.", "Try a different filter to find your changes.")
       } else {
@@ -617,7 +625,14 @@ impl Render for Lens {
                 .text_size(px(12.))
                 .child(
                   gpui_component::checkbox::Checkbox::new("select-visible-changes")
-                    .label(tf("{count} changed files", &[("count", visible_count.to_string())]))
+                    .label(tf(
+                      if state_filter == ChangeStateFilter::Locked {
+                        "{count} locked files"
+                      } else {
+                        "{count} changed files"
+                      },
+                      &[("count", visible_count.to_string())],
+                    ))
                     .checked(all_visible_selected)
                     .disabled(self.busy || visible_paths.is_empty())
                     .on_click(cx.listener(move |this, checked: &bool, _, cx| {
@@ -678,6 +693,19 @@ impl Render for Lens {
                         .when(self.change_state_filter == ChangeStateFilter::Unstaged, |b| b.text_color(rgb(Accent)).font_weight(FontWeight::SEMIBOLD))
                         .on_click(cx.listener(|this, _, _, cx| {
                           this.change_state_filter = ChangeStateFilter::Unstaged;
+                          this.pending_folder_focus = None;
+                          cx.notify();
+                        })),
+                    )
+                    .child(div().text_color(rgb(MUTED)).child("|"))
+                    .child(
+                      Button::new("change-state-locked")
+                        .border_0()
+                        .small()
+                        .label(t("Locked"))
+                        .when(self.change_state_filter == ChangeStateFilter::Locked, |b| b.text_color(rgb(Accent)).font_weight(FontWeight::SEMIBOLD))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                          this.change_state_filter = ChangeStateFilter::Locked;
                           this.pending_folder_focus = None;
                           cx.notify();
                         })),
@@ -964,7 +992,7 @@ impl Render for Lens {
             .bg(gpui::rgba(0x00000080))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .child(
               div()
                 .w(px(420.))
@@ -1014,7 +1042,7 @@ impl Render for Lens {
             .bg(gpui::rgba(0x00000080))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .child(
               div()
                 .w(px(420.))

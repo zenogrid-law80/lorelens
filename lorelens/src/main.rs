@@ -120,6 +120,7 @@ enum ChangeStateFilter {
   All,
   Staged,
   Unstaged,
+  Locked,
 }
 
 enum DiffRetry {
@@ -176,6 +177,7 @@ struct Lens {
   pending_filter: Entity<TextInput>,
   change_state_filter: ChangeStateFilter,
   selected_path: Entity<TextInput>,
+  pending_changes: Vec<Change>,
   pending_visible: Vec<usize>,
   pending_rows: Vec<PendingTreeRow>,
   pending_folder_focus: Option<String>,
@@ -496,7 +498,7 @@ impl Lens {
             output_title: "Welcome to LoreLens".into(), logs: vec![],
             message: cx.new(|cx| CommitMessage::new(window, cx)),
             pending_folder_focus: None,
-            filter, pending_filter, change_state_filter: ChangeStateFilter::All, selected_path, pending_visible: Vec::new(), pending_rows: Vec::new(), notice: "Opening repository…".into(), error: false, show_log, obliterate_enabled: false,
+            filter, pending_filter, change_state_filter: ChangeStateFilter::All, selected_path, pending_changes: Vec::new(), pending_visible: Vec::new(), pending_rows: Vec::new(), notice: "Opening repository…".into(), error: false, show_log, obliterate_enabled: false,
             settings, updates, settings_error, branch_output: String::new(), show_branches: false,
             connect_after_load,
             startup_login_checked: !connect_after_load,
@@ -1128,7 +1130,7 @@ impl Lens {
     let rgb = palette(cx);
     let filtering = !self.pending_filter.read(cx).content.is_empty();
     let expanded = !self.collapsed_change_folders.contains(&path) || filtering;
-    let folder_change = change_index.and_then(|index| self.status.changes.get(index));
+    let folder_change = change_index.and_then(|index| self.pending_changes.get(index));
     let checkbox = folder_change.map(|change| (change_index.expect("folder change index"), change.path.clone()));
     let selected = self.pending_folder_focus.as_ref() == Some(&path) || folder_change.is_some_and(|change| self.selection.paths.contains(&change.path));
     let (selected_background, selected_foreground) = selected_row_palette(cx, window_active);
@@ -1258,7 +1260,8 @@ impl Lens {
           let Some((folder_paths, has_unstaged, has_staged, ready, vcs, exists, bookmarked, delete_allowed, shortcut_settings)) = view.upgrade().map(|entity| {
             let lens = entity.read(cx);
             let folder_paths = if lens.root == context_root {
-              state::pending_folder_paths(&lens.status.changes, &context_path)
+              let visible_changes: Vec<_> = lens.pending_visible.iter().map(|index| lens.pending_changes[*index].clone()).collect();
+              state::pending_folder_paths(&visible_changes, &context_path)
             } else {
               Vec::new()
             };
@@ -1294,7 +1297,8 @@ impl Lens {
               if this.busy || this.root != select_root {
                 return;
               }
-              let paths = state::pending_folder_paths(&this.status.changes, &select_path);
+              let visible_changes: Vec<_> = this.pending_visible.iter().map(|index| this.pending_changes[*index].clone()).collect();
+              let paths = state::pending_folder_paths(&visible_changes, &select_path);
               if paths.is_empty() {
                 return;
               }
@@ -1431,7 +1435,7 @@ impl Lens {
             .pending_rows
             .iter()
             .filter_map(|row| match row {
-              PendingTreeRow::Change { index, .. } => Some(this.status.changes[*index].path.clone()),
+              PendingTreeRow::Change { index, .. } => Some(this.pending_changes[*index].path.clone()),
               PendingTreeRow::Folder { .. } => None,
             })
             .collect();
@@ -1444,15 +1448,17 @@ impl Lens {
           cx.notify();
         }))
         .context_menu(move |mut menu, _, cx| {
-          let Some((paths, stage_paths, diff_path, resolve_path, context_file, context_exists, ready, enabled)) = view.upgrade().and_then(|entity| {
+          let Some((paths, change_paths, stage_paths, diff_path, resolve_path, context_file, context_exists, ready, enabled)) = view.upgrade().and_then(|entity| {
             let lens = entity.read(cx);
             if lens.root != context_root {
               return None;
             }
             let use_selection = lens.selection.paths.contains(&context_path);
             let mut paths = Vec::new();
+            let mut change_paths = Vec::new();
             let mut stage_paths = Vec::new();
-            for change in &lens.status.changes {
+            for &index in &lens.pending_visible {
+              let change = &lens.pending_changes[index];
               if !(if use_selection {
                 lens.selection.paths.contains(&change.path)
               } else {
@@ -1461,8 +1467,11 @@ impl Lens {
                 continue;
               }
               paths.push(change.path.clone());
-              if !change.staged && !change.conflict {
-                stage_paths.push(change.path.clone());
+              if let Some(change) = lens.status.changes.get(index) {
+                change_paths.push(change.path.clone());
+                if !change.staged && !change.conflict {
+                  stage_paths.push(change.path.clone());
+                }
               }
             }
             if paths.is_empty() {
@@ -1488,7 +1497,17 @@ impl Lens {
               .all(|change| !matches!(change.node_type.to_ascii_lowercase().as_str(), "directory" | "folder"))
               && !lens.root.join(&context_path).is_dir();
             let context_exists = matches!(lens.root.join(&context_path).try_exists(), Ok(true));
-            Some((paths, stage_paths, diff_path, resolve_path, context_file, context_exists, !lens.busy, !lens.busy && lens.connected))
+            Some((
+              paths,
+              change_paths,
+              stage_paths,
+              diff_path,
+              resolve_path,
+              context_file,
+              context_exists,
+              !lens.busy,
+              !lens.busy && lens.connected,
+            ))
           }) else {
             return menu;
           };
@@ -1578,14 +1597,14 @@ impl Lens {
           }
           let revert_view = view.clone();
           let revert_root = context_root.clone();
-          let revert_paths = paths.clone();
+          let revert_paths = change_paths;
           menu = menu.item(
             PopupMenuItem::new(shortcuts::shortcut_label(
               &shortcut_settings,
               if selected_paths.len() > 1 { "Revert selected files" } else { "Revert file…" },
               "revert",
             ))
-            .disabled(!enabled)
+            .disabled(!enabled || revert_paths.is_empty())
             .on_click(move |_, window, cx| {
               let _ = revert_view.update(cx, |this, cx| {
                 if this.root == revert_root {
@@ -1713,7 +1732,10 @@ impl Lens {
         _ => "Unknown type",
       },
     };
-    let state = if change.conflict {
+    let locked = self.locked_paths.iter().any(|path| same_change_path(path, &change.path));
+    let state = if index >= self.status.changes.len() {
+      "Locked"
+    } else if change.conflict {
       "Conflict"
     } else if change.staged {
       "Staged"
@@ -1790,7 +1812,7 @@ impl Lens {
               MUTED
             })
           })
-          .child(t(state)),
+          .child(if locked && state != "Locked" { format!("{} · {}", t(state), t("Locked")) } else { t(state) }),
       )
   }
 }

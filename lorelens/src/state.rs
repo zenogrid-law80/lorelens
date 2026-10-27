@@ -2,6 +2,35 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::backend::Change;
 
+/// Keep status indices intact; append unchanged locked files only for the lock view.
+/// These display entries must never be used as repository changes for mutations.
+pub(super) fn pending_display_changes(changes: &[Change], locked_paths: &HashSet<String>, include_locked: bool) -> Vec<Change> {
+  let mut display = changes.to_vec();
+  if include_locked {
+    let mut known_paths: HashSet<_> = changes.iter().map(|change| pending_path_key(&change.path)).collect();
+    let mut locks: Vec<_> = locked_paths.iter().collect();
+    locks.sort();
+    for path in locks {
+      if known_paths.insert(pending_path_key(path)) {
+        display.push(Change {
+          path: path.replace('\\', "/"),
+          node_type: "file".into(),
+          ..Default::default()
+        });
+      }
+    }
+  }
+  display
+}
+
+pub(super) fn pending_path_key(path: &str) -> String {
+  let mut path = path.replace('\\', "/");
+  if cfg!(windows) {
+    path.make_ascii_lowercase();
+  }
+  path
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PendingTreeRow {
   Folder { path: String, name: String, depth: usize, change_index: Option<usize> },
@@ -261,6 +290,60 @@ mod tests {
     Change {
       path: path.into(),
       ..Default::default()
+    }
+  }
+
+  #[test]
+  fn locked_display_includes_unchanged_files_without_altering_status_indices() {
+    let mut staged = change("src/staged.rs");
+    staged.action = "modify".into();
+    staged.staged = true;
+    let mut conflict = change("src/conflict.rs");
+    conflict.action = "modify".into();
+    conflict.conflict = true;
+    let changes = [change("unlocked.txt"), staged, conflict];
+    let locks = ["src/staged.rs".into(), "src/conflict.rs".into(), "assets/clean.png".into(), "remote/absent.bin".into()].into();
+    let display = pending_display_changes(&changes, &locks, true);
+    assert_eq!(
+      display.iter().map(|change| change.path.as_str()).collect::<Vec<_>>(),
+      ["unlocked.txt", "src/staged.rs", "src/conflict.rs", "assets/clean.png", "remote/absent.bin"]
+    );
+    assert!(display[1].staged);
+    assert!(display[2].conflict);
+    assert_eq!(display[1].action, "modify");
+    assert!(display[3].action.is_empty());
+    assert!(!display[3].staged);
+    assert_eq!(changes.len(), 3);
+    let visible = [1, 2, 3, 4];
+    let rows = pending_tree_rows(&display, &visible, &HashSet::new());
+    assert_eq!(rows.iter().filter_map(PendingTreeRow::change_index).collect::<HashSet<_>>(), visible.into());
+  }
+
+  #[test]
+  fn ordinary_change_views_exclude_unchanged_locks() {
+    let changes = [change("changed.txt")];
+    let locks = ["clean.txt".into()].into();
+    let display = pending_display_changes(&changes, &locks, false);
+    assert_eq!(display.len(), 1);
+    assert_eq!(display[0].path, "changed.txt");
+    assert!(pending_display_changes(&[], &locks, false).is_empty());
+    assert_eq!(pending_display_changes(&[], &locks, true)[0].path, "clean.txt");
+    assert!(pending_display_changes(&[], &HashSet::new(), true).is_empty());
+  }
+
+  #[test]
+  fn locked_display_deduplicates_normalized_paths() {
+    let changes = [change("src\\main.rs")];
+    let locks = ["src/main.rs".into(), "src\\main.rs".into(), "assets\\clean.png".into(), "assets/clean.png".into()].into();
+    let display = pending_display_changes(&changes, &locks, true);
+    assert_eq!(display.len(), 2);
+    assert_eq!(display[0].path, "src\\main.rs");
+    assert_eq!(display[1].path, "assets/clean.png");
+    assert_eq!(pending_path_key("src\\main.rs"), pending_path_key("src/main.rs"));
+    if cfg!(windows) {
+      let locks = ["SRC/MAIN.RS".into()].into();
+      assert_eq!(pending_display_changes(&changes, &locks, true).len(), 1);
+      assert_eq!(pending_path_key("SRC/MAIN.RS"), pending_path_key("src/main.rs"));
     }
   }
 
